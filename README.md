@@ -32,9 +32,9 @@
 - **Fake signatures**
   - Embeds dummy packer/watermarks (Themida, VMProtect, Enigma, etc.) to trip up signature scanners.
 - **Compile-time randomization**
-  - All transformations and injections use compile-time random ribbons—no two builds are alike.
+  - All transformations and injections use compile-time random ribbons, no two builds are alike.
 - **Full modular configuration**
-  - Every feature is a toggle—disable heavy modules for performance or size.
+  - Every feature is a toggle, disable heavy modules for performance or size.
 
 ***
 Below is an image from IDA after compilation of demo.cpp, wherein all strings are hidden and there are various subroutines, all polymorphed and hidden.
@@ -159,7 +159,7 @@ All features are **header-only** and are **Windows-focused** (with advanced anti
 
 - Inspired by legendary tools: obfusheader.h, nimrodhide.h, and the anti-re tools of unknowncheats.
 - Created by helz.dev/Helzky / Discord: `helz.dev`
-- Open for contributions and issues!
+- Open for contributions and issues! Please submit issues via Github or DM me directly!
 
 ***
 
