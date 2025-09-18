@@ -37,6 +37,8 @@
   - Every feature is a toggle—disable heavy modules for performance or size.
 
 ***
+![Image from IDA after compilation of demo.cpp](helloworldvm.png)
+***
 
 ## ⚡ Quick Usage
 
