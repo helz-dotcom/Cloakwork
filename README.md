@@ -37,6 +37,7 @@
   - Every feature is a toggle—disable heavy modules for performance or size.
 
 ***
+Below is an image from IDA after compilation of demo.cpp, wherein all strings are hidden and there are various subroutines, all polymorphed and hidden.
 ![Image from IDA after compilation of demo.cpp](helloworldvm.png)
 ***
 
