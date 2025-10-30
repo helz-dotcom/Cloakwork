@@ -135,6 +135,7 @@
     #include <windows.h>
     #include <intrin.h>
     #include <winternl.h>
+    #include <tlhelp32.h>
 #endif
 
 // compiler detection and configuration
@@ -198,14 +199,17 @@
 //
 // ANTI-DEBUGGING/ANALYSIS
 // -----------------------
-// CW_ANTI_DEBUG()                  - crashes if debugger detected (multiple techniques)
+// CW_ANTI_DEBUG()                  - crashes if debugger detected (comprehensive checks)
 //                                    usage: CW_ANTI_DEBUG();
 //
-// CW_CHECK_ANALYSIS()              - comprehensive check for debuggers/hardware breakpoints
+// CW_CHECK_ANALYSIS()              - comprehensive check for debuggers/analysis tools
 //                                    usage: CW_CHECK_ANALYSIS();
 //
-// anti_debug::is_debugger_present() - returns true if debugger detected
+// anti_debug::is_debugger_present() - returns true if debugger detected (basic checks)
 //                                     usage: if(anti_debug::is_debugger_present()) { }
+//
+// anti_debug::comprehensive_check() - advanced multi-layered debugger detection
+//                                     usage: if(anti_debug::comprehensive_check()) { }
 //
 // anti_debug::timing_check(func)   - detects debuggers via timing analysis
 //                                    usage: if(timing_check([](){}, 1000)) { }
@@ -215,6 +219,26 @@
 //
 // anti_debug::has_hardware_breakpoints() - checks debug registers
 //                                          usage: if(has_hardware_breakpoints()) { }
+//
+// ADVANCED ANTI-DEBUG (anti_debug::advanced namespace)
+// ---------------------------------------------------
+// advanced::detect_hiding_tools()  - detects scyllahide, titanhide, debugger windows
+//                                    usage: if(advanced::detect_hiding_tools()) { }
+//
+// advanced::kernel_debugger_present() - checks for kernel-level debuggers
+//                                       usage: if(advanced::kernel_debugger_present()) { }
+//
+// advanced::advanced_timing_check() - compares rdtsc vs qpc for hook detection
+//                                     usage: if(advanced::advanced_timing_check()) { }
+//
+// advanced::suspicious_parent_process() - checks if spawned by debugger
+//                                         usage: if(advanced::suspicious_parent_process()) { }
+//
+// advanced::detect_memory_breakpoints() - scans for page guard breakpoints
+//                                         usage: if(advanced::detect_memory_breakpoints(addr, size)) { }
+//
+// advanced::detect_debugger_artifacts() - checks registry for debugger installations
+//                                         usage: if(advanced::detect_debugger_artifacts()) { }
 //
 // COMPILE-TIME RANDOMIZATION
 // --------------------------
@@ -356,6 +380,81 @@ namespace cloakwork {
             return hash;
         }
 
+        // runtime entropy sources - combines multiple sources for unique per-execution randomness
+        inline uint64_t runtime_entropy() {
+            uint64_t entropy = 0;
+
+#ifdef _WIN32
+            // rdtsc - cpu cycle counter (changes every execution)
+            entropy ^= __rdtsc();
+
+            // process and thread ids (aslr makes these different per run)
+            entropy ^= static_cast<uint64_t>(GetCurrentProcessId()) << 32;
+            entropy ^= static_cast<uint64_t>(GetCurrentThreadId());
+
+            // stack address (aslr randomizes this)
+            volatile char stack_var;
+            entropy ^= reinterpret_cast<uint64_t>(&stack_var);
+
+            // module base address (aslr randomizes this)
+            HMODULE module = GetModuleHandleA(nullptr);
+            entropy ^= reinterpret_cast<uint64_t>(module);
+
+            // high-precision performance counter
+            LARGE_INTEGER perf_counter;
+            QueryPerformanceCounter(&perf_counter);
+            entropy ^= static_cast<uint64_t>(perf_counter.QuadPart);
+
+            // system time with high precision
+            FILETIME ft;
+            GetSystemTimeAsFileTime(&ft);
+            entropy ^= (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+
+            // heap address (also aslr randomized)
+            void* heap_alloc = HeapAlloc(GetProcessHeap(), 0, 16);
+            if (heap_alloc) {
+                entropy ^= reinterpret_cast<uint64_t>(heap_alloc);
+                HeapFree(GetProcessHeap(), 0, heap_alloc);
+            }
+#else
+            // fallback for non-windows platforms
+            entropy ^= reinterpret_cast<uint64_t>(&entropy);
+            entropy ^= static_cast<uint64_t>(time(nullptr));
+#endif
+
+            // mix the entropy thoroughly using knuth's multiplicative hash
+            entropy ^= std::rotl(entropy, 31);
+            entropy *= 0x9e3779b97f4a7c15ULL;
+            entropy ^= entropy >> 27;
+            entropy *= 0x94d049bb133111ebULL;
+            entropy ^= entropy >> 31;
+
+            return entropy;
+        }
+
+        // per-binary unique identifier that combines compile-time and runtime entropy
+        struct binary_entropy {
+            static constexpr uint64_t compile_part1 = fnv1a_hash(__TIMESTAMP__);
+            static constexpr uint64_t compile_part2 = fnv1a_hash(__FILE__) ^ __LINE__;
+            static constexpr uint64_t compile_part3 = ((fnv1a_hash(__TIME__) * 1664525u) ^ fnv1a_hash(__DATE__));
+
+            // get a runtime key that's unique per execution
+            static inline uint64_t get_runtime_key() {
+                static uint64_t cached_key = 0;
+                if (cached_key == 0) {
+                    // combine compile-time constants with runtime entropy
+                    cached_key = compile_part1 ^ compile_part2 ^ compile_part3;
+                    cached_key ^= runtime_entropy();
+
+                    // additional mixing
+                    cached_key ^= std::rotl(cached_key, 31);
+                    cached_key *= 0x9e3779b97f4a7c15ULL;
+                    cached_key ^= cached_key >> 27;
+                }
+                return cached_key;
+            }
+        };
+
         constexpr uint32_t compile_seed() {
             // combine multiple compile-time values for entropy
             constexpr uint32_t time_hash = fnv1a_hash(__TIME__);
@@ -392,53 +491,64 @@ namespace cloakwork {
         // check for debugger presence using multiple techniques
         CW_FORCEINLINE bool is_debugger_present() {
 #ifdef _WIN32
-            // technique 1: isdebuggerpresent api
+            // technique 1: isdebuggerpresent api (most reliable)
             if (::IsDebuggerPresent()) return true;
 
-            // technique 2: peb flag check (x64 compatible) - wrapped in try-catch for safety - this wasnt working before but now is due to some magic that i dont really fully understand if im being honest
+            // technique 2: peb flag check (x64 compatible)
             __try {
 #ifdef _WIN64
                 PPEB peb = (PPEB)__readgsqword(0x60);
                 if (peb && peb->BeingDebugged) return true;
 
-                // technique 3: ntglobalflag check
+                // technique 3: ntglobalflag check (disabled - too many false positives)
+                // this can be set in debug builds even without debugger
+                /*
                 if (peb) {
                     DWORD nt_global_flag = *(DWORD*)((uint8_t*)peb + 0xBC);
                     if (nt_global_flag & 0x70) return true;
                 }
+                */
 #else
                 PPEB peb = (PPEB)__readfsdword(0x30);
                 if (peb && peb->BeingDebugged) return true;
 
-                // technique 3: ntglobalflag check
+                // technique 3: ntglobalflag check (disabled - too many false positives)
+                /*
                 if (peb) {
                     DWORD nt_global_flag = *(DWORD*)((uint8_t*)peb + 0x68);
                     if (nt_global_flag & 0x70) return true;
                 }
+                */
 #endif
             }
             __except(EXCEPTION_EXECUTE_HANDLER) {
                 // silently handle access violations
             }
 
-            // technique 4: heap flag checks, careful cause this is a heavier check
-            HANDLE heap = GetProcessHeap();
-            if (heap) {
-                DWORD heap_flags = 0;
-                DWORD heap_force_flags = 0;
+            // technique 4: heap flag checks (disabled - too many false positives)
+            // these flags can be set in debug builds or certain configurations
+            /*
+            __try {
+                HANDLE heap = GetProcessHeap();
+                if (heap) {
+                    DWORD heap_flags = 0;
+                    DWORD heap_force_flags = 0;
 
-                if (sizeof(void*) == 8) {
-                    // 64-bit offsets
-                    heap_flags = *(DWORD*)((uint8_t*)heap + 0x70);
-                    heap_force_flags = *(DWORD*)((uint8_t*)heap + 0x74);
-                } else {
-                    // 32-bit offsets
-                    heap_flags = *(DWORD*)((uint8_t*)heap + 0x40);
-                    heap_force_flags = *(DWORD*)((uint8_t*)heap + 0x44);
+                    if (sizeof(void*) == 8) {
+                        // 64-bit offsets
+                        heap_flags = *(DWORD*)((uint8_t*)heap + 0x70);
+                        heap_force_flags = *(DWORD*)((uint8_t*)heap + 0x74);
+                    } else {
+                        // 32-bit offsets
+                        heap_flags = *(DWORD*)((uint8_t*)heap + 0x40);
+                        heap_force_flags = *(DWORD*)((uint8_t*)heap + 0x44);
+                    }
+
+                    if ((heap_flags & 0x02) || heap_force_flags != 0) return true;
                 }
-
-                if ((heap_flags & 0x02) || heap_force_flags != 0) return true;
             }
+            __except(EXCEPTION_EXECUTE_HANDLER) {}
+            */
 #endif
             return false;
         }
@@ -483,12 +593,281 @@ namespace cloakwork {
 #endif
             return false;
         }
+
+        // modern anti-debug techniques
+        namespace advanced {
+
+            // detect common anti-anti-debug plugins (scyllahide, titanhide, etc.)
+            CW_FORCEINLINE bool detect_hiding_tools() {
+#ifdef _WIN32
+                __try {
+                    // check for scyllahide dlls
+                    if (GetModuleHandleA("scylla_hide.dll")) return true;
+                    if (GetModuleHandleA("ScyllaHideX64.dll")) return true;
+                    if (GetModuleHandleA("ScyllaHideX86.dll")) return true;
+
+                    // check for titanhide
+                    if (GetModuleHandleA("TitanHide.dll")) return true;
+
+                    // check for known debugger window classes
+                    const char* debugger_windows[] = {
+                        "OLLYDBG",
+                        "WinDbgFrameClass",
+                        "ID",  // immunity debugger
+                        "Zeta Debugger",
+                        "Rock Debugger",
+                        "ObsidianGUI",
+                        nullptr
+                    };
+
+                    for (int i = 0; debugger_windows[i] != nullptr; i++) {
+                        if (FindWindowA(debugger_windows[i], nullptr)) return true;
+                    }
+
+                    // check for x64dbg/x32dbg by window title
+                    if (FindWindowA(nullptr, "x64dbg")) return true;
+                    if (FindWindowA(nullptr, "x32dbg")) return true;
+                    if (FindWindowA(nullptr, "x96dbg")) return true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    // silently handle exceptions
+                    return false;
+                }
+#endif
+                return false;
+            }
+
+            // detect kernel debugger
+            CW_FORCEINLINE bool kernel_debugger_present() {
+#ifdef _WIN32
+                __try {
+                    typedef NTSTATUS (NTAPI* pNtQuerySystemInformation)(
+                        ULONG SystemInformationClass,
+                        PVOID SystemInformation,
+                        ULONG SystemInformationLength,
+                        PULONG ReturnLength
+                    );
+
+                    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+                    if (!ntdll) return false;
+
+                    auto NtQuerySystemInformation =
+                        reinterpret_cast<pNtQuerySystemInformation>(
+                            GetProcAddress(ntdll, "NtQuerySystemInformation"));
+
+                    if (NtQuerySystemInformation) {
+                        ULONG kernel_debug = 0;
+                        // SystemKernelDebuggerInformation = 0x23
+                        NTSTATUS status = NtQuerySystemInformation(0x23, &kernel_debug, sizeof(kernel_debug), nullptr);
+                        if (status == 0 && kernel_debug != 0) return true;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    // silently handle exceptions
+                    return false;
+                }
+#endif
+                return false;
+            }
+
+            // advanced timing check (compares rdtsc vs qpc)
+            CW_FORCEINLINE bool advanced_timing_check() {
+#ifdef _WIN32
+                __try {
+                    // compare rdtsc vs queryperformancecounter
+                    LARGE_INTEGER freq, qpc_start, qpc_end;
+                    if (!QueryPerformanceFrequency(&freq) || freq.QuadPart == 0) {
+                        return false;  // can't perform timing check
+                    }
+
+                    uint64_t tsc_start = __rdtsc();
+                    QueryPerformanceCounter(&qpc_start);
+
+                    // small operation
+                    volatile int dummy = 0;
+                    for (int i = 0; i < 100; i++) dummy += i;
+
+                    QueryPerformanceCounter(&qpc_end);
+                    uint64_t tsc_end = __rdtsc();
+
+                    // calculate elapsed time using both methods
+                    uint64_t tsc_delta = tsc_end - tsc_start;
+                    uint64_t qpc_delta_us = ((qpc_end.QuadPart - qpc_start.QuadPart) * 1000000) / freq.QuadPart;
+
+                    // if operation took suspiciously long (debugger step-through)
+                    if (tsc_delta > 1000000) return true;
+
+                    // check for inconsistent timing (one clock source is hooked)
+                    if (qpc_delta_us > 0) {
+                        double ratio = static_cast<double>(tsc_delta) / static_cast<double>(qpc_delta_us);
+                        // ratio should be relatively consistent (cpu frequency dependent)
+                        // extreme values indicate hooking
+                        if (ratio < 0.5 || ratio > 100000.0) return true;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    // silently handle exceptions
+                    return false;
+                }
+#endif
+                return false;
+            }
+
+            // check if parent process is a debugger
+            CW_FORCEINLINE bool suspicious_parent_process() {
+#ifdef _WIN32
+                __try {
+                    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+                    if (snapshot == INVALID_HANDLE_VALUE) return false;
+
+                    PROCESSENTRY32W pe;
+                    pe.dwSize = sizeof(PROCESSENTRY32W);
+                    DWORD current_pid = GetCurrentProcessId();
+                    DWORD parent_pid = 0;
+
+                    // find our parent pid
+                    if (Process32FirstW(snapshot, &pe)) {
+                        do {
+                            if (pe.th32ProcessID == current_pid) {
+                                parent_pid = pe.th32ParentProcessID;
+                                break;
+                            }
+                        } while (Process32NextW(snapshot, &pe));
+                    }
+
+                    // find parent process name
+                    if (parent_pid) {
+                        pe.dwSize = sizeof(PROCESSENTRY32W);
+                        if (Process32FirstW(snapshot, &pe)) {
+                            do {
+                                if (pe.th32ProcessID == parent_pid) {
+                                    // check against known debuggers
+                                    const wchar_t* suspicious_parents[] = {
+                                        L"x64dbg.exe", L"x32dbg.exe", L"ollydbg.exe",
+                                        L"ida.exe", L"ida64.exe", L"windbg.exe",
+                                        L"immunitydebugger.exe", L"cheatengine-x86_64.exe",
+                                        L"cheatengine-i386.exe", L"processhacker.exe",
+                                        nullptr
+                                    };
+
+                                    wchar_t lower_name[MAX_PATH];
+                                    wcscpy_s(lower_name, MAX_PATH, pe.szExeFile);
+                                    _wcslwr_s(lower_name, MAX_PATH);
+
+                                    for (int i = 0; suspicious_parents[i] != nullptr; i++) {
+                                        if (wcsstr(lower_name, suspicious_parents[i])) {
+                                            CloseHandle(snapshot);
+                                            return true;
+                                        }
+                                    }
+                                    break;
+                                }
+                            } while (Process32NextW(snapshot, &pe));
+                        }
+                    }
+
+                    CloseHandle(snapshot);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    // silently handle exceptions
+                    return false;
+                }
+#endif
+                return false;
+            }
+
+            // detect memory breakpoints (page guard)
+            CW_FORCEINLINE bool detect_memory_breakpoints(void* address, size_t size) {
+#ifdef _WIN32
+                MEMORY_BASIC_INFORMATION mbi;
+                uint8_t* ptr = static_cast<uint8_t*>(address);
+                size_t remaining = size;
+
+                while (remaining > 0) {
+                    if (VirtualQuery(ptr, &mbi, sizeof(mbi)) == 0) break;
+
+                    // check for page guard (used for memory breakpoints)
+                    if (mbi.Protect & PAGE_GUARD) return true;
+
+                    size_t block_size = mbi.RegionSize - (ptr - static_cast<uint8_t*>(mbi.BaseAddress));
+                    if (block_size > remaining) block_size = remaining;
+
+                    ptr += block_size;
+                    remaining -= block_size;
+                }
+#endif
+                return false;
+            }
+
+            // check for debugger-specific registry keys
+            CW_FORCEINLINE bool detect_debugger_artifacts() {
+#ifdef _WIN32
+                __try {
+                    // check for common debugger installation paths in registry
+                    HKEY key;
+                    const char* debugger_keys[] = {
+                        "SOFTWARE\\x64dbg",
+                        "SOFTWARE\\OllyDbg",
+                        "SOFTWARE\\Immunity Inc\\Immunity Debugger",
+                        nullptr
+                    };
+
+                    for (int i = 0; debugger_keys[i] != nullptr; i++) {
+                        if (RegOpenKeyExA(HKEY_CURRENT_USER, debugger_keys[i], 0, KEY_READ, &key) == ERROR_SUCCESS) {
+                            RegCloseKey(key);
+                            return true;
+                        }
+                        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, debugger_keys[i], 0, KEY_READ, &key) == ERROR_SUCCESS) {
+                            RegCloseKey(key);
+                            return true;
+                        }
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    // silently handle exceptions
+                    return false;
+                }
+#endif
+                return false;
+            }
+        }
+
+        // comprehensive check combining all techniques
+        CW_FORCEINLINE bool comprehensive_check() {
+            __try {
+                // basic checks
+                if (is_debugger_present()) return true;
+                if (has_hardware_breakpoints()) return true;
+
+                // advanced checks - wrapped individually for safety
+                __try {
+                    if (advanced::detect_hiding_tools()) return true;
+                } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+                __try {
+                    if (advanced::kernel_debugger_present()) return true;
+                } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+                // skip timing check by default - too many false positives
+                // if (advanced::advanced_timing_check()) return true;
+
+                __try {
+                    if (advanced::suspicious_parent_process()) return true;
+                } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+                return false;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                // if anything goes wrong, assume no debugger
+                return false;
+            }
+        }
     }
 
     // macro to crash if debugger detected
     #define CW_ANTI_DEBUG() \
         do { \
-            if(cloakwork::anti_debug::is_debugger_present()) { \
+            if(cloakwork::anti_debug::comprehensive_check()) { \
                 __debugbreak(); \
                 *(volatile int*)0 = 0; \
             } \
@@ -517,10 +896,20 @@ namespace cloakwork {
             std::array<char, N> data;
             mutable bool decrypted = false;
 
-            // multi-layer xor encryption
+            // compile-time keys (unique per build)
+            static constexpr uint8_t compile_key1 = static_cast<uint8_t>(Key1);
+            static constexpr uint8_t compile_key2 = static_cast<uint8_t>(Key2);
+
+            // runtime key derivation (unique per execution)
+            static inline uint8_t get_runtime_key_base() {
+                static uint8_t key = static_cast<uint8_t>(detail::binary_entropy::get_runtime_key() & 0xFF);
+                return key;
+            }
+
+            // compile-time encryption only (no runtime component yet)
             static constexpr char encrypt_char(char c, size_t i) {
-                char k1 = Key1 + static_cast<char>(i);
-                char k2 = Key2 - static_cast<char>(i * 3);
+                char k1 = compile_key1 + static_cast<char>(i);
+                char k2 = compile_key2 - static_cast<char>(i * 3);
                 char k3 = static_cast<char>((i * i) ^ 0x5A);
                 return c ^ k1 ^ k2 ^ k3;
             }
@@ -528,11 +917,19 @@ namespace cloakwork {
             CW_FORCEINLINE void decrypt_impl() const {
                 if(!decrypted) {
                     auto& mutable_data = const_cast<std::array<char, N>&>(data);
+                    uint8_t runtime_key = get_runtime_key_base();
+
                     for(size_t i = 0; i < N; ++i) {
-                        char k1 = Key1 + static_cast<char>(i);
-                        char k2 = Key2 - static_cast<char>(i * 3);
+                        // reverse compile-time encryption first
+                        char k1 = compile_key1 + static_cast<char>(i);
+                        char k2 = compile_key2 - static_cast<char>(i * 3);
                         char k3 = static_cast<char>((i * i) ^ 0x5A);
                         mutable_data[i] ^= k1 ^ k2 ^ k3;
+
+                        // apply runtime key layer (different per execution)
+                        uint8_t runtime_layer = runtime_key + static_cast<uint8_t>(i * 7);
+                        runtime_layer = std::rotl(runtime_layer, (i % 5) + 1);
+                        mutable_data[i] ^= static_cast<char>(runtime_layer);
                     }
                     const_cast<bool&>(decrypted) = true;
                 }
@@ -1444,22 +1841,9 @@ namespace cloakwork {
 
             // polymorphic encryption with multiple layers
             void multi_layer_encrypt() {
-                // layer 1: xor with rotating key
-                uint8_t key1 = static_cast<uint8_t>(CW_RANDOM());
-                for(size_t i = 0; i < code.size(); ++i) {
-                    code[i] ^= key1;
-                    key1 = std::rotl(key1, 1) + static_cast<uint8_t>(i);
-                }
-
-                // layer 2: substitution cipher
-                for(size_t i = 0; i < code.size(); ++i) {
-                    code[i] = std::rotl(code[i], (i % 7) + 1);
-                }
-
-                // layer 3: position-dependent transform
-                for(size_t i = 1; i < code.size(); ++i) {
-                    code[i] ^= code[i-1];
-                }
+                // disabled for now - the multi-layer encryption/decryption has bugs
+                // TODO: fix the decryption to properly reverse all layers
+                // for now, bytecode is stored unencrypted but still obfuscated via morphing
             }
 
             // instruction morphing - replace single instruction with equivalent sequence
@@ -1540,23 +1924,14 @@ namespace cloakwork {
             }
 
             bytecode_builder& emit_imm(uint64_t value) {
-                // obfuscate immediate values
-                uint64_t obf_value = value ^ CW_RANDOM();
+                // store immediate value directly (no obfuscation for now)
+                // TODO: fix obfuscation by storing key with value
 
-                // store with random endianness
-                if(CW_RANDOM() % 2) {
-                    // little-endian
-                    for(int i = 0; i < 8; ++i) {
-                        code.push_back(static_cast<uint8_t>(obf_value >> (i * 8)));
-                    }
-                    code.push_back(0x00); // endianness marker
-                } else {
-                    // big-endian
-                    for(int i = 7; i >= 0; --i) {
-                        code.push_back(static_cast<uint8_t>(obf_value >> (i * 8)));
-                    }
-                    code.push_back(0xFF); // endianness marker
+                // always use little-endian for simplicity
+                for(int i = 0; i < 8; ++i) {
+                    code.push_back(static_cast<uint8_t>(value >> (i * 8)));
                 }
+                code.push_back(0x00); // endianness marker (always little-endian)
 
                 return *this;
             }
@@ -1682,23 +2057,8 @@ namespace cloakwork {
 
                 uint8_t byte = bytecode[ctx.ip()];
 
-                // reverse multi-layer encryption
-                // layer 3 reverse: position-dependent
-                if(ctx.ip() > 0) {
-                    byte ^= bytecode[ctx.ip() - 1];
-                }
-
-                // layer 2 reverse: substitution
-                byte = std::rotr(byte, (ctx.ip() % 7) + 1);
-
-                // layer 1 reverse: xor with rotating key
-                byte ^= decrypt.key1;
-                decrypt.key1 = std::rotl(decrypt.key1, 1) + static_cast<uint8_t>(ctx.ip());
-
-                // decoy operations
-                volatile uint8_t fake = fake_bytecode[ctx.ip() % fake_bytecode.size()];
-                fake = fake ^ decrypt.key2;
-                decrypt.key2 = std::rotl(decrypt.key2, 3);
+                // encryption disabled for now - just read directly
+                // TODO: re-enable multi-layer encryption once decryption bugs are fixed
 
                 ctx.set_ip(ctx.ip() + 1);
                 return byte;
@@ -1729,9 +2089,7 @@ namespace cloakwork {
                     }
                 }
 
-                // de-obfuscate value
-                value ^= CW_RANDOM();
-
+                // no de-obfuscation needed since values aren't obfuscated anymore
                 return value;
             }
 
@@ -2157,8 +2515,7 @@ namespace cloakwork {
     #if CW_ENABLE_ANTI_DEBUG
         #define CW_CHECK_ANALYSIS() \
             do { \
-                if(cloakwork::anti_debug::is_debugger_present() || \
-                   cloakwork::anti_debug::has_hardware_breakpoints()) { \
+                if(cloakwork::anti_debug::comprehensive_check()) { \
                     volatile int crash = *(int*)0; \
                 } \
             } while(0)
