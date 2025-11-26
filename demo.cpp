@@ -131,9 +131,56 @@ int main() {
     std::cout << std::endl;
 
     // ==================================================================
-    // 5. MIXED BOOLEAN ARITHMETIC (MBA) DEMO
+    // 5. BOOLEAN OBFUSCATION DEMO
     // ==================================================================
-    std::cout << "[5] Mixed Boolean Arithmetic Demo" << std::endl;
+    std::cout << "[5] Boolean Obfuscation Demo" << std::endl;
+
+    // CW_TRUE and CW_FALSE - obfuscated constants using opaque predicates
+    std::cout << "   testing CW_TRUE: ";
+    if (CW_TRUE) {
+        std::cout << "always executes (correct)" << std::endl;
+    } else {
+        std::cout << "ERROR - should not happen" << std::endl;
+    }
+
+    std::cout << "   testing CW_FALSE: ";
+    if (CW_FALSE) {
+        std::cout << "ERROR - should not happen" << std::endl;
+    } else {
+        std::cout << "never executes true branch (correct)" << std::endl;
+    }
+
+    // CW_BOOL - obfuscate boolean expressions
+    int test_x = 50;
+    int test_y = 100;
+    bool obf_result = CW_BOOL(test_x < test_y);
+    std::cout << "   CW_BOOL(50 < 100) = " << (obf_result ? "true" : "false") << " (expected: true)" << std::endl;
+
+    bool obf_result2 = CW_BOOL(test_x > test_y);
+    std::cout << "   CW_BOOL(50 > 100) = " << (obf_result2 ? "true" : "false") << " (expected: false)" << std::endl;
+
+    // obfuscated_bool class for persistent storage
+    cloakwork::bool_obfuscation::obfuscated_bool license_flag(true);
+    std::cout << "   obfuscated_bool(true).get() = " << (license_flag.get() ? "true" : "false") << std::endl;
+
+    license_flag = false;
+    std::cout << "   after setting to false: " << (license_flag.get() ? "true" : "false") << std::endl;
+
+    // demonstrate logical operators
+    cloakwork::bool_obfuscation::obfuscated_bool flag_a(true);
+    cloakwork::bool_obfuscation::obfuscated_bool flag_b(false);
+    std::cout << "   !obfuscated_bool(true) = " << ((!flag_a).get() ? "true" : "false") << " (expected: false)" << std::endl;
+    std::cout << "   obfuscated_bool(true) && false = " << ((flag_a && false).get() ? "true" : "false") << " (expected: false)" << std::endl;
+    std::cout << "   obfuscated_bool(false) || true = " << ((flag_b || true).get() ? "true" : "false") << " (expected: true)" << std::endl;
+
+    std::cout << "   (booleans stored as multi-byte patterns, not simple 0/1)" << std::endl;
+
+    std::cout << std::endl;
+
+    // ==================================================================
+    // 6. MIXED BOOLEAN ARITHMETIC (MBA) DEMO
+    // ==================================================================
+    std::cout << "[6] Mixed Boolean Arithmetic Demo" << std::endl;
 
     // demonstrate MBA transformations (normally hidden inside obfuscation)
     using namespace cloakwork::mba;
@@ -158,9 +205,9 @@ int main() {
     std::cout << std::endl;
 
     // ==================================================================
-    // 6. CONTROL FLOW OBFUSCATION
+    // 7. CONTROL FLOW OBFUSCATION
     // ==================================================================
-    std::cout << "[6] Control Flow Obfuscation Demo" << std::endl;
+    std::cout << "[7] Control Flow Obfuscation Demo" << std::endl;
 
     auto test_value_obf = CW_INT(100);
     int test_value = test_value_obf.get();
@@ -180,9 +227,9 @@ int main() {
     std::cout << std::endl;
 
     // ==================================================================
-    // 7. CONTROL FLOW FLATTENING
+    // 8. CONTROL FLOW FLATTENING
     // ==================================================================
-    std::cout << "[7] Control Flow Flattening Demo" << std::endl;
+    std::cout << "[8] Control Flow Flattening Demo" << std::endl;
 
     // flatten the control flow via state machine
     auto flattened_result = CW_FLATTEN(calculate_something, 15);
@@ -192,9 +239,9 @@ int main() {
     std::cout << std::endl;
 
     // ==================================================================
-    // 8. FUNCTION POINTER OBFUSCATION
+    // 9. FUNCTION POINTER OBFUSCATION
     // ==================================================================
-    std::cout << "[8] Function Pointer Obfuscation Demo" << std::endl;
+    std::cout << "[9] Function Pointer Obfuscation Demo" << std::endl;
 
     // obfuscate function pointer with anti-debug checks
     auto obfuscated_func = CW_CALL(simple_add);
@@ -205,9 +252,9 @@ int main() {
     std::cout << std::endl;
 
     // ==================================================================
-    // 9. METAMORPHIC FUNCTION DEMO
+    // 10. METAMORPHIC FUNCTION DEMO
     // ==================================================================
-    std::cout << "[9] Metamorphic Function Demo" << std::endl;
+    std::cout << "[10] Metamorphic Function Demo" << std::endl;
 
     // create metamorphic function that switches between implementations
     cloakwork::metamorphic::metamorphic_function<int(int, int)> meta_add({simple_add, simple_add_v2});
@@ -222,9 +269,9 @@ int main() {
     std::cout << std::endl;
 
     // ==================================================================
-    // 10. COMPREHENSIVE PROTECTION DEMO
+    // 11. COMPREHENSIVE PROTECTION DEMO
     // ==================================================================
-    std::cout << "[10] Comprehensive Protection Demo" << std::endl;
+    std::cout << "[11] Comprehensive Protection Demo" << std::endl;
     std::cout << "    combining multiple protection layers..." << std::endl;
 
     // protected "secret" calculation with all layers
@@ -249,9 +296,9 @@ int main() {
     std::cout << std::endl;
 
     // ==================================================================
-    // 11. ADVANCED ANTI-DEBUG SHOWCASE
+    // 12. ADVANCED ANTI-DEBUG SHOWCASE
     // ==================================================================
-    std::cout << "[11] Advanced Anti-Debug Techniques" << std::endl;
+    std::cout << "[12] Advanced Anti-Debug Techniques" << std::endl;
     std::cout << "    running comprehensive analysis detection..." << std::endl;
 
     // check for advanced debugging techniques
@@ -284,15 +331,16 @@ int main() {
     std::cout << std::endl;
 
     // ==================================================================
-    // 12. ENCRYPTED MESSAGE OUTPUT
+    // 13. ENCRYPTED MESSAGE OUTPUT
     // ==================================================================
-    std::cout << "[12] Final Encrypted Output" << std::endl;
+    std::cout << "[13] Final Encrypted Output" << std::endl;
 
     // all these strings are encrypted and have unique runtime keys
     std::cout << "    " << CW_STR("this demo showcases:") << std::endl;
     std::cout << "    - " << CW_STR_LAYERED("multi-layer compile-time string encryption") << std::endl;
     std::cout << "    - " << CW_STR_LAYERED("stack-based auto-clearing encrypted strings") << std::endl;
     std::cout << "    - " << CW_STR("mixed boolean arithmetic (MBA) obfuscation") << std::endl;
+    std::cout << "    - " << CW_STR("boolean obfuscation with opaque predicates") << std::endl;
     std::cout << "    - " << CW_STR("enhanced value obfuscation with MBA") << std::endl;
     std::cout << "    - " << CW_STR("control flow obfuscation and flattening") << std::endl;
     std::cout << "    - " << CW_STR("function pointer encryption") << std::endl;

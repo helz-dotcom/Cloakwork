@@ -78,6 +78,27 @@ int and_result = CW_AND(a, b);
 int or_result = CW_OR(a, b);
 ```
 
+**Boolean Obfuscation:**
+```cpp
+// obfuscated true/false using opaque predicates
+if (CW_TRUE) {
+    // always executes, but looks complex in disassembly
+}
+
+if (CW_FALSE) {
+    // never executes, but confuses static analysis
+}
+
+// obfuscate any boolean expression
+bool result = CW_BOOL(x > 0 && y < 100);
+
+// obfuscated_bool class for persistent storage
+cloakwork::bool_obfuscation::obfuscated_bool is_licensed(true);
+if (is_licensed) {
+    // stored with multi-byte encoding, not simple 0/1
+}
+```
+
 **Data Hiding:**
 ```cpp
 // scatter data across heap allocations
@@ -203,6 +224,13 @@ Performance-focused configuration:
 - `CW_AND(a, b)` – Obfuscated bitwise AND using MBA
 - `CW_OR(a, b)` – Obfuscated bitwise OR using MBA
 
+### Boolean Obfuscation
+
+- `CW_TRUE` – Obfuscated true using opaque predicates (always evaluates to true)
+- `CW_FALSE` – Obfuscated false using opaque predicates (always evaluates to false)
+- `CW_BOOL(expr)` – Obfuscates any boolean expression through indirection
+- `cloakwork::bool_obfuscation::obfuscated_bool` – Class for storing obfuscated boolean values with multi-byte encoding
+
 ### Data Hiding
 
 - `CW_SCATTER(x)` – Scatters data across heap allocations
@@ -239,6 +267,7 @@ Performance-focused configuration:
 
 - `cloakwork::obfuscated_value<T>` – Generic value obfuscation
 - `cloakwork::mba_obfuscated<T>` – MBA-based obfuscation
+- `cloakwork::bool_obfuscation::obfuscated_bool` – Multi-byte boolean storage with verification
 - `cloakwork::data_hiding::scattered_value<T, Chunks>` – Data scattering
 - `cloakwork::data_hiding::polymorphic_value<T>` – Polymorphic value
 - `cloakwork::obfuscated_call<Func>` – Function pointer obfuscation

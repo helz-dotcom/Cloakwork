@@ -183,6 +183,20 @@
 // CW_POLY(value)                   - creates polymorphic value that mutates internally
 //                                    usage: auto poly = CW_POLY(100);
 //
+// BOOLEAN OBFUSCATION
+// -------------------
+// CW_TRUE                          - obfuscated true using opaque predicates
+//                                    usage: if (CW_TRUE) { /* always executes */ }
+//
+// CW_FALSE                         - obfuscated false using opaque predicates
+//                                    usage: if (CW_FALSE) { /* never executes */ }
+//
+// CW_BOOL(expr)                    - obfuscates a boolean expression
+//                                    usage: bool result = CW_BOOL(x > 0);
+//
+// obfuscated_bool                  - class for storing obfuscated boolean values
+//                                    usage: obfuscated_bool flag(true);
+//
 // obfuscated_value<T>              - template class for obfuscating any value type
 //                                    usage: obfuscated_value<int> val(42);
 //
@@ -1248,6 +1262,175 @@ namespace cloakwork {
         CW_FORCEINLINE mba_obfuscated& operator=(T val) { set(val); return *this; }
     };
 
+    // =================================================================
+    // boolean obfuscation
+    // =================================================================
+
+    namespace bool_obfuscation {
+
+        // obfuscated true using multiple opaque predicates and runtime values
+        template<int N = CW_RAND_CT(1, 1000)>
+        CW_FORCEINLINE bool obfuscated_true() {
+            // runtime value prevents constant folding
+            volatile int runtime_val = static_cast<int>(reinterpret_cast<uintptr_t>(&runtime_val) & 0xFF);
+            int x = N + runtime_val;
+            CW_COMPILER_BARRIER();
+
+            // multiple always-true predicates combined
+            // property: product of consecutive integers is always even
+            bool result = ((x * (x + 1)) % 2) == 0;
+
+            // property: x OR x is always x
+            result = result && ((x | x) == x);
+
+            // property: x XOR 0 is always x
+            result = result && ((x ^ 0) == x);
+
+            // property: x AND x is always x
+            result = result && ((x & x) == x);
+
+            // MBA identity: ~(~x) == x
+            result = result && ((~(~x)) == x);
+
+            CW_COMPILER_BARRIER();
+            return result;
+        }
+
+        // obfuscated false using multiple opaque predicates
+        template<int N = CW_RAND_CT(1, 1000)>
+        CW_FORCEINLINE bool obfuscated_false() {
+            volatile int runtime_val = static_cast<int>(reinterpret_cast<uintptr_t>(&runtime_val) & 0xFF);
+            int x = N + runtime_val;
+            CW_COMPILER_BARRIER();
+
+            // multiple always-false predicates combined
+            // property: x AND (NOT x) is always 0
+            bool result = ((x & (~x)) != 0);
+
+            // property: x XOR x is always 0
+            result = result || ((x ^ x) != 0);
+
+            // property: impossible condition
+            result = result || (x * x < 0);
+
+            // MBA identity: (x - x) is always 0
+            result = result || (mba::sub_mba(x, x) != 0);
+
+            CW_COMPILER_BARRIER();
+            return result;
+        }
+
+        // obfuscate a boolean expression through indirection
+        template<int N = CW_RAND_CT(1, 1000)>
+        CW_FORCEINLINE bool obfuscate_bool(bool value) {
+            CW_COMPILER_BARRIER();
+
+            // transform: value = (value AND true) OR (false AND anything)
+            // mathematically equivalent to just 'value', but harder to analyze
+            bool true_val = obfuscated_true<N>();
+            bool false_val = obfuscated_false<N + 1>();
+
+            // multiple transformation layers
+            bool layer1 = value && true_val;
+            bool layer2 = false_val && (!value);
+            bool result = layer1 || layer2;
+
+            // additional confusion: XOR with known values
+            result = result ^ false_val;  // XOR with false doesn't change value
+
+            CW_COMPILER_BARRIER();
+            return result;
+        }
+
+        // class for storing obfuscated boolean values with anti-pattern storage
+        template<uint8_t Key1 = static_cast<uint8_t>(CW_RAND_CT(1, 255)),
+                 uint8_t Key2 = static_cast<uint8_t>(CW_RAND_CT(1, 255)),
+                 uint8_t Key3 = static_cast<uint8_t>(CW_RAND_CT(1, 255))>
+        class obfuscated_bool {
+        private:
+            mutable uint8_t encoded_primary;
+            mutable uint8_t encoded_secondary;
+            mutable uint8_t encoded_tertiary;
+            mutable std::atomic<uint32_t> access_count{0};
+
+            // distinct patterns for true/false that don't look like 0/1
+            static constexpr uint8_t TRUE_PATTERN = Key1 ^ 0xAA ^ Key2;
+            static constexpr uint8_t FALSE_PATTERN = Key1 ^ 0x55 ^ Key3;
+            static constexpr uint8_t VERIFY_MASK = Key2 ^ Key3;
+
+            CW_FORCEINLINE void encode(bool value) {
+                uint8_t runtime_noise = static_cast<uint8_t>(CW_RANDOM_RT() & 0xF0);
+
+                if (value) {
+                    // encode true across multiple bytes with different patterns
+                    encoded_primary = TRUE_PATTERN ^ runtime_noise;
+                    encoded_secondary = static_cast<uint8_t>(~encoded_primary) ^ Key1;
+                    encoded_tertiary = (encoded_primary + encoded_secondary) ^ VERIFY_MASK;
+                } else {
+                    // encode false with different patterns
+                    encoded_primary = FALSE_PATTERN ^ runtime_noise;
+                    encoded_secondary = static_cast<uint8_t>(~encoded_primary) ^ Key2;
+                    encoded_tertiary = (encoded_primary - encoded_secondary) ^ VERIFY_MASK;
+                }
+            }
+
+            CW_FORCEINLINE bool decode() const {
+                // decode using pattern matching, not simple comparison
+                uint8_t reconstructed = encoded_primary ^ (static_cast<uint8_t>(~encoded_primary) ^ Key1);
+                uint8_t check = encoded_secondary ^ Key1;
+
+                // verify integrity through tertiary byte
+                uint8_t expected_true = (encoded_primary + (static_cast<uint8_t>(~encoded_primary) ^ Key1)) ^ VERIFY_MASK;
+                bool is_true_pattern = (encoded_tertiary == expected_true);
+
+                // use MBA to compute final result
+                int true_indicator = is_true_pattern ? 1 : 0;
+                int one = mba::sub_mba(2, 1);
+                return mba::sub_mba(true_indicator, 0) == one;
+            }
+
+        public:
+            obfuscated_bool() { encode(false); }
+            obfuscated_bool(bool value) { encode(value); }
+
+            CW_FORCEINLINE bool get() const {
+                // periodic anti-debug check
+                if ((++access_count % 500) == 0) {
+                    CW_INLINE_CHECK();
+                }
+
+                bool raw_value = decode();
+                // return through obfuscation layer
+                return obfuscate_bool(raw_value);
+            }
+
+            CW_FORCEINLINE void set(bool value) {
+                encode(value);
+            }
+
+            CW_FORCEINLINE operator bool() const { return get(); }
+            CW_FORCEINLINE obfuscated_bool& operator=(bool value) { set(value); return *this; }
+
+            // logical operators
+            CW_FORCEINLINE obfuscated_bool operator!() const {
+                return obfuscated_bool(!get());
+            }
+
+            CW_FORCEINLINE obfuscated_bool operator&&(bool other) const {
+                return obfuscated_bool(get() && other);
+            }
+
+            CW_FORCEINLINE obfuscated_bool operator||(bool other) const {
+                return obfuscated_bool(get() || other);
+            }
+        };
+    }
+
+    // convenience macros for boolean obfuscation
+    #define CW_TRUE (cloakwork::bool_obfuscation::obfuscated_true<CW_RAND_CT(1, 1000)>())
+    #define CW_FALSE (cloakwork::bool_obfuscation::obfuscated_false<CW_RAND_CT(1, 1000)>())
+    #define CW_BOOL(x) (cloakwork::bool_obfuscation::obfuscate_bool<CW_RAND_CT(1, 1000)>(x))
+
     // convenience macros for MBA operations
     #define CW_ADD(a, b) (cloakwork::mba::add_mba((a), (b)))
     #define CW_SUB(a, b) (cloakwork::mba::sub_mba((a), (b)))
@@ -1285,6 +1468,32 @@ namespace cloakwork {
     #define CW_SUB(a, b) ((a) - (b))
     #define CW_AND(a, b) ((a) & (b))
     #define CW_OR(a, b) ((a) | (b))
+
+    // no-op boolean obfuscation when disabled
+    namespace bool_obfuscation {
+        template<int N = 0> inline bool obfuscated_true() { return true; }
+        template<int N = 0> inline bool obfuscated_false() { return false; }
+        template<int N = 0> inline bool obfuscate_bool(bool value) { return value; }
+
+        class obfuscated_bool {
+        private:
+            bool value;
+        public:
+            obfuscated_bool() : value(false) {}
+            obfuscated_bool(bool val) : value(val) {}
+            CW_FORCEINLINE bool get() const { return value; }
+            CW_FORCEINLINE void set(bool val) { value = val; }
+            CW_FORCEINLINE operator bool() const { return value; }
+            CW_FORCEINLINE obfuscated_bool& operator=(bool val) { value = val; return *this; }
+            CW_FORCEINLINE obfuscated_bool operator!() const { return obfuscated_bool(!value); }
+            CW_FORCEINLINE obfuscated_bool operator&&(bool other) const { return obfuscated_bool(value && other); }
+            CW_FORCEINLINE obfuscated_bool operator||(bool other) const { return obfuscated_bool(value || other); }
+        };
+    }
+
+    #define CW_TRUE (true)
+    #define CW_FALSE (false)
+    #define CW_BOOL(x) (x)
 #endif
 
     // =================================================================
