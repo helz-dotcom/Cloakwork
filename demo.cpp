@@ -331,22 +331,220 @@ int main() {
     std::cout << std::endl;
 
     // ==================================================================
-    // 13. ENCRYPTED MESSAGE OUTPUT
+    // 13. WIDE STRING ENCRYPTION
     // ==================================================================
-    std::cout << "[13] Final Encrypted Output" << std::endl;
+    std::cout << "[13] Wide String Encryption Demo" << std::endl;
+
+    const wchar_t* wide_msg = CW_WSTR(L"this is an encrypted wide string!");
+    std::wcout << L"   encrypted wide string: " << wide_msg << std::endl;
+
+    std::cout << std::endl;
+
+    // ==================================================================
+    // 14. COMPILE-TIME STRING HASHING
+    // ==================================================================
+    std::cout << "[14] Compile-Time String Hashing Demo" << std::endl;
+
+    // compile-time hash - computed at build time
+    constexpr uint32_t kernel32_hash = CW_HASH("kernel32.dll");
+    constexpr uint32_t ntdll_hash = CW_HASH("ntdll.dll");
+
+    std::cout << "   hash of 'kernel32.dll': 0x" << std::hex << kernel32_hash << std::dec << std::endl;
+    std::cout << "   hash of 'ntdll.dll': 0x" << std::hex << ntdll_hash << std::dec << std::endl;
+
+    // runtime hash comparison
+    const char* test_str = "kernel32.dll";
+    uint32_t runtime_hash = cloakwork::hash::fnv1a_runtime(test_str);
+    std::cout << "   runtime hash matches compile-time: " << (runtime_hash == kernel32_hash ? "yes" : "no") << std::endl;
+
+    std::cout << std::endl;
+
+    // ==================================================================
+    // 15. IMPORT HIDING / DYNAMIC API RESOLUTION
+    // ==================================================================
+    std::cout << "[15] Import Hiding Demo" << std::endl;
+    std::cout << "   resolving APIs without import table..." << std::endl;
+
+    // get ntdll base address by hash (use case-insensitive hash for module names)
+    void* ntdll_base = cloakwork::imports::getModuleBase(CW_HASH_CI("ntdll.dll"));
+    std::cout << "   ntdll.dll base: 0x" << std::hex << reinterpret_cast<uintptr_t>(ntdll_base) << std::dec << std::endl;
+
+    // get kernel32 base
+    void* k32_base = cloakwork::imports::getModuleBase(CW_HASH_CI("kernel32.dll"));
+    std::cout << "   kernel32.dll base: 0x" << std::hex << reinterpret_cast<uintptr_t>(k32_base) << std::dec << std::endl;
+
+    // resolve function by hash
+    if (ntdll_base) {
+        void* nt_close = cloakwork::imports::getProcAddress(ntdll_base, CW_HASH("NtClose"));
+        std::cout << "   NtClose address: 0x" << std::hex << reinterpret_cast<uintptr_t>(nt_close) << std::dec << std::endl;
+    }
+
+    std::cout << "   (these functions are not in the import table!)" << std::endl;
+
+    std::cout << std::endl;
+
+    // ==================================================================
+    // 16. DIRECT SYSCALL NUMBERS
+    // ==================================================================
+    std::cout << "[16] Direct Syscall Demo" << std::endl;
+
+    uint32_t syscall_NtClose = CW_SYSCALL_NUMBER(NtClose);
+    uint32_t syscall_NtQueryInformationProcess = CW_SYSCALL_NUMBER(NtQueryInformationProcess);
+
+    std::cout << "   NtClose syscall number: 0x" << std::hex << syscall_NtClose << std::dec << std::endl;
+    std::cout << "   NtQueryInformationProcess syscall number: 0x" << std::hex << syscall_NtQueryInformationProcess << std::dec << std::endl;
+    std::cout << "   (syscall numbers are OS version dependent)" << std::endl;
+
+    std::cout << std::endl;
+
+    // ==================================================================
+    // 17. ANTI-VM/SANDBOX DETECTION
+    // ==================================================================
+    std::cout << "[17] Anti-VM/Sandbox Detection Demo" << std::endl;
+    std::cout << "   running VM/sandbox detection checks..." << std::endl;
+
+    if (cloakwork::anti_debug::anti_vm::is_hypervisor_present()) {
+        std::cout << "   INFO: hypervisor detected" << std::endl;
+    } else {
+        std::cout << "   hypervisor check: clean" << std::endl;
+    }
+
+    if (cloakwork::anti_debug::anti_vm::detect_vm_vendor()) {
+        std::cout << "   INFO: VM vendor signature detected" << std::endl;
+    } else {
+        std::cout << "   VM vendor check: clean" << std::endl;
+    }
+
+    if (cloakwork::anti_debug::anti_vm::detect_low_resources()) {
+        std::cout << "   INFO: low resources detected (possible sandbox)" << std::endl;
+    } else {
+        std::cout << "   resource check: clean" << std::endl;
+    }
+
+    if (cloakwork::anti_debug::anti_vm::detect_sandbox_dlls()) {
+        std::cout << "   INFO: sandbox DLLs detected" << std::endl;
+    } else {
+        std::cout << "   sandbox DLL check: clean" << std::endl;
+    }
+
+    if (CW_CHECK_VM()) {
+        std::cout << "   COMPREHENSIVE: VM/sandbox detected (CW_ANTI_VM would crash)" << std::endl;
+    } else {
+        std::cout << "   COMPREHENSIVE: all VM/sandbox checks passed" << std::endl;
+    }
+
+    std::cout << std::endl;
+
+    // ==================================================================
+    // 18. OBFUSCATED COMPARISONS
+    // ==================================================================
+    std::cout << "[18] Obfuscated Comparisons Demo" << std::endl;
+
+    int cmp_a = 42;
+    int cmp_b = 42;
+    int cmp_c = 100;
+
+    std::cout << "   CW_EQ(42, 42) = " << (CW_EQ(cmp_a, cmp_b) ? "true" : "false") << " (expected: true)" << std::endl;
+    std::cout << "   CW_NE(42, 100) = " << (CW_NE(cmp_a, cmp_c) ? "true" : "false") << " (expected: true)" << std::endl;
+    std::cout << "   CW_LT(42, 100) = " << (CW_LT(cmp_a, cmp_c) ? "true" : "false") << " (expected: true)" << std::endl;
+    std::cout << "   CW_GT(100, 42) = " << (CW_GT(cmp_c, cmp_a) ? "true" : "false") << " (expected: true)" << std::endl;
+    std::cout << "   CW_LE(42, 42) = " << (CW_LE(cmp_a, cmp_b) ? "true" : "false") << " (expected: true)" << std::endl;
+    std::cout << "   CW_GE(100, 42) = " << (CW_GE(cmp_c, cmp_a) ? "true" : "false") << " (expected: true)" << std::endl;
+    std::cout << "   (comparisons use MBA and XOR to hide the actual operation)" << std::endl;
+
+    std::cout << std::endl;
+
+    // ==================================================================
+    // 19. ENCRYPTED CONSTANTS
+    // ==================================================================
+    std::cout << "[19] Encrypted Constants Demo" << std::endl;
+
+    // compile-time encrypted constant
+    int encrypted_magic = CW_CONST(0xDEADBEEF);
+    std::cout << "   CW_CONST(0xDEADBEEF) = 0x" << std::hex << encrypted_magic << std::dec << std::endl;
+
+    int encrypted_value = CW_CONST(12345);
+    std::cout << "   CW_CONST(12345) = " << encrypted_value << std::endl;
+
+    // runtime constant (different key each execution)
+    cloakwork::constants::runtime_constant<int> rt_const(9999);
+    std::cout << "   runtime_constant(9999) = " << rt_const.get() << std::endl;
+    std::cout << "   (constants are XOR-encrypted and decrypted at runtime)" << std::endl;
+
+    std::cout << std::endl;
+
+    // ==================================================================
+    // 20. JUNK CODE INSERTION
+    // ==================================================================
+    std::cout << "[20] Junk Code Insertion Demo" << std::endl;
+
+    std::cout << "   inserting junk computation..." << std::endl;
+    CW_JUNK();
+    std::cout << "   junk computation complete" << std::endl;
+
+    std::cout << "   inserting junk control flow..." << std::endl;
+    CW_JUNK_FLOW();
+    std::cout << "   junk control flow complete" << std::endl;
+
+    std::cout << "   (junk code confuses decompilers and increases entropy)" << std::endl;
+
+    std::cout << std::endl;
+
+    // ==================================================================
+    // 21. RETURN ADDRESS SPOOFING
+    // ==================================================================
+    std::cout << "[21] Return Address Spoofing Demo" << std::endl;
+
+    void* ret_gadget = cloakwork::spoof::getRetGadget();
+    std::cout << "   found ret gadget at: 0x" << std::hex << reinterpret_cast<uintptr_t>(ret_gadget) << std::dec << std::endl;
+    std::cout << "   (can be used to spoof return addresses in call stacks)" << std::endl;
+
+    std::cout << std::endl;
+
+    // ==================================================================
+    // 22. INTEGRITY VERIFICATION
+    // ==================================================================
+    std::cout << "[22] Integrity Verification Demo" << std::endl;
+
+    // check if our own functions are hooked
+    bool simple_add_hooked = CW_DETECT_HOOK(simple_add);
+    std::cout << "   simple_add hook check: " << (simple_add_hooked ? "HOOKED!" : "clean") << std::endl;
+
+    // compute hash of function
+    uint32_t func_hash = cloakwork::integrity::computeHash(
+        reinterpret_cast<const void*>(&simple_add), 32);
+    std::cout << "   simple_add code hash: 0x" << std::hex << func_hash << std::dec << std::endl;
+
+    // verify multiple functions at once
+    bool all_clean = cloakwork::integrity::verifyFunctions(&simple_add, &simple_add_v2);
+    std::cout << "   all functions clean: " << (all_clean ? "yes" : "NO - hooks detected!") << std::endl;
+
+    std::cout << std::endl;
+
+    // ==================================================================
+    // 23. ENCRYPTED MESSAGE OUTPUT
+    // ==================================================================
+    std::cout << "[23] Final Encrypted Output" << std::endl;
 
     // all these strings are encrypted and have unique runtime keys
     std::cout << "    " << CW_STR("this demo showcases:") << std::endl;
     std::cout << "    - " << CW_STR_LAYERED("multi-layer compile-time string encryption") << std::endl;
-    std::cout << "    - " << CW_STR_LAYERED("stack-based auto-clearing encrypted strings") << std::endl;
+    std::cout << "    - " << CW_STR_LAYERED("wide string encryption (wchar_t)") << std::endl;
+    std::cout << "    - " << CW_STR("compile-time string hashing (FNV-1a)") << std::endl;
     std::cout << "    - " << CW_STR("mixed boolean arithmetic (MBA) obfuscation") << std::endl;
     std::cout << "    - " << CW_STR("boolean obfuscation with opaque predicates") << std::endl;
-    std::cout << "    - " << CW_STR("enhanced value obfuscation with MBA") << std::endl;
+    std::cout << "    - " << CW_STR("obfuscated comparison operators") << std::endl;
+    std::cout << "    - " << CW_STR("encrypted compile-time constants") << std::endl;
     std::cout << "    - " << CW_STR("control flow obfuscation and flattening") << std::endl;
+    std::cout << "    - " << CW_STR("junk code insertion") << std::endl;
     std::cout << "    - " << CW_STR("function pointer encryption") << std::endl;
     std::cout << "    - " << CW_STR("metamorphic function implementations") << std::endl;
+    std::cout << "    - " << CW_STR("import hiding / dynamic API resolution") << std::endl;
+    std::cout << "    - " << CW_STR("direct syscall number extraction") << std::endl;
+    std::cout << "    - " << CW_STR("return address spoofing infrastructure") << std::endl;
     std::cout << "    - " << CW_STR("comprehensive anti-debug protection") << std::endl;
-    std::cout << "    - " << CW_STR("detection of modern analysis tools") << std::endl;
+    std::cout << "    - " << CW_STR("anti-VM/sandbox detection") << std::endl;
+    std::cout << "    - " << CW_STR("code integrity verification / hook detection") << std::endl;
 
     std::cout << std::endl;
     std::cout << "=== DEMO COMPLETE ===" << std::endl;

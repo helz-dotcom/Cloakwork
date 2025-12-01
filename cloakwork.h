@@ -41,6 +41,10 @@
 // CW_ENABLE_DATA_HIDING            - scattered/polymorphic values (default: 1)
 // CW_ENABLE_METAMORPHIC            - metamorphic code generation (default: 1)
 // CW_ENABLE_COMPILE_TIME_RANDOM    - compile-time random generation (default: 1)
+// CW_ENABLE_IMPORT_HIDING          - dynamic API resolution / import hiding (default: 1)
+// CW_ENABLE_SYSCALLS               - direct syscall invocation (default: 1)
+// CW_ENABLE_ANTI_VM                - anti-VM/sandbox detection (default: 1)
+// CW_ENABLE_INTEGRITY_CHECKS       - self-integrity verification (default: 1)
 // CW_ANTI_DEBUG_RESPONSE           - response to debugger detection: 0=ignore, 1=crash, 2=fake (default: 1)
 //
 // Minimal configuration example:
@@ -95,6 +99,22 @@
     #define CW_ENABLE_METAMORPHIC CW_ENABLE_ALL
 #endif
 
+#ifndef CW_ENABLE_IMPORT_HIDING
+    #define CW_ENABLE_IMPORT_HIDING CW_ENABLE_ALL
+#endif
+
+#ifndef CW_ENABLE_SYSCALLS
+    #define CW_ENABLE_SYSCALLS CW_ENABLE_ALL
+#endif
+
+#ifndef CW_ENABLE_ANTI_VM
+    #define CW_ENABLE_ANTI_VM CW_ENABLE_ALL
+#endif
+
+#ifndef CW_ENABLE_INTEGRITY_CHECKS
+    #define CW_ENABLE_INTEGRITY_CHECKS CW_ENABLE_ALL
+#endif
+
 #ifndef CW_ANTI_DEBUG_RESPONSE
     #define CW_ANTI_DEBUG_RESPONSE 1  // 0=ignore, 1=crash, 2=fake data
 #endif
@@ -129,6 +149,38 @@
     #include <intrin.h>
     #include <winternl.h>
     #include <tlhelp32.h>
+    #include <iphlpapi.h>
+    #pragma comment(lib, "iphlpapi.lib")
+
+    // full LDR_DATA_TABLE_ENTRY structure (winternl.h has incomplete definition, fuck those guys)
+    namespace cloakwork_internal {
+        struct CW_LDR_DATA_TABLE_ENTRY {
+            LIST_ENTRY InLoadOrderLinks;
+            LIST_ENTRY InMemoryOrderLinks;
+            LIST_ENTRY InInitializationOrderLinks;
+            PVOID DllBase;
+            PVOID EntryPoint;
+            ULONG SizeOfImage;
+            UNICODE_STRING FullDllName;
+            UNICODE_STRING BaseDllName;
+            ULONG Flags;
+            USHORT LoadCount;
+            USHORT TlsIndex;
+            union {
+                LIST_ENTRY HashLinks;
+                struct {
+                    PVOID SectionPointer;
+                    ULONG CheckSum;
+                };
+            };
+            union {
+                ULONG TimeDateStamp;
+                PVOID LoadedImports;
+            };
+            PVOID EntryPointActivationContext;
+            PVOID PatchInformation;
+        };
+    }
 #endif
 
 // compiler detection and configuration
@@ -262,6 +314,104 @@
 //
 // CW_RAND_RT(min, max)             - runtime random in range [min, max]
 //                                    usage: int x = CW_RAND_RT(1, 100);
+//
+// WIDE STRING ENCRYPTION
+// ----------------------
+// CW_WSTR(L"text")                  - encrypts wide string at compile-time
+//                                    usage: const wchar_t* msg = CW_WSTR(L"secret");
+//
+// STRING HASHING
+// --------------
+// CW_HASH("text")                   - compile-time FNV-1a hash of string (case-sensitive)
+//                                    usage: constexpr uint32_t h = CW_HASH("NtClose");
+//
+// CW_HASH_CI("text")                - compile-time case-insensitive hash (for module names)
+//                                    usage: constexpr uint32_t h = CW_HASH_CI("kernel32.dll");
+//
+// CW_HASH_WIDE(L"text")             - compile-time hash of wide string
+//                                    usage: constexpr uint32_t h = CW_HASH_WIDE(L"ntdll.dll");
+//
+// hash::fnv1a_runtime(str)          - runtime hash of string
+//                                    usage: uint32_t h = hash::fnv1a_runtime(dynamicStr);
+//
+// IMPORT HIDING
+// -------------
+// CW_IMPORT(mod, func)              - resolve function without import table
+//                                    usage: auto pFunc = CW_IMPORT("kernel32.dll", VirtualAlloc);
+//
+// imports::getModuleBase(hash)      - get module base by hash
+//                                    usage: void* ntdll = imports::getModuleBase(CW_HASH("ntdll.dll"));
+//
+// imports::getProcAddress(mod, hash) - get function by hash
+//                                     usage: void* func = imports::getProcAddress(mod, CW_HASH("NtClose"));
+//
+// DIRECT SYSCALLS
+// ---------------
+// CW_SYSCALL_NUMBER(func)           - get syscall number for ntdll function
+//                                    usage: uint32_t num = CW_SYSCALL_NUMBER(NtClose);
+//
+// syscall::getSyscallNumber(hash)   - get syscall number by function hash
+//                                    usage: uint32_t num = syscall::getSyscallNumber(CW_HASH("NtClose"));
+//
+// ANTI-VM/SANDBOX DETECTION
+// -------------------------
+// CW_ANTI_VM()                      - crashes if VM/sandbox detected
+//                                    usage: CW_ANTI_VM();
+//
+// CW_CHECK_VM()                     - returns true if VM/sandbox detected
+//                                    usage: if(CW_CHECK_VM()) { /* in VM */ }
+//
+// anti_vm::comprehensive_check()    - comprehensive VM/sandbox detection
+//                                    usage: if(anti_debug::anti_vm::comprehensive_check()) { }
+//
+// OBFUSCATED COMPARISONS
+// ----------------------
+// CW_EQ(a, b)                       - obfuscated equality check (a == b)
+//                                    usage: if(CW_EQ(x, 42)) { }
+//
+// CW_NE(a, b)                       - obfuscated not-equals (a != b)
+// CW_LT(a, b)                       - obfuscated less-than (a < b)
+// CW_GT(a, b)                       - obfuscated greater-than (a > b)
+// CW_LE(a, b)                       - obfuscated less-or-equal (a <= b)
+// CW_GE(a, b)                       - obfuscated greater-or-equal (a >= b)
+//
+// ENCRYPTED CONSTANTS
+// -------------------
+// CW_CONST(value)                   - encrypted compile-time constant
+//                                    usage: int x = CW_CONST(0xDEADBEEF);
+//
+// constants::runtime_constant<T>    - runtime-keyed constant (unique per execution)
+//                                    usage: runtime_constant<int> val(42);
+//
+// JUNK CODE INSERTION
+// -------------------
+// CW_JUNK()                         - insert junk computation
+//                                    usage: CW_JUNK();
+//
+// CW_JUNK_FLOW()                    - insert junk with fake control flow
+//                                    usage: CW_JUNK_FLOW();
+//
+// RETURN ADDRESS SPOOFING
+// -----------------------
+// CW_SPOOF_CALL(func)               - call with spoofed return address
+//                                    usage: auto spoof = CW_SPOOF_CALL(myFunc);
+//
+// spoof::getRetGadget()             - get cached ret gadget for spoofing
+//                                    usage: void* gadget = spoof::getRetGadget();
+//
+// INTEGRITY VERIFICATION
+// ----------------------
+// CW_INTEGRITY_CHECK(func, size)    - wrap function with integrity checking
+//                                    usage: auto checked = CW_INTEGRITY_CHECK(myFunc, 64);
+//
+// CW_DETECT_HOOK(func)              - check if function is hooked
+//                                    usage: if(CW_DETECT_HOOK(VirtualAlloc)) { /* hooked */ }
+//
+// integrity::computeHash(data, size) - compute hash of memory region
+//                                     usage: uint32_t h = integrity::computeHash(ptr, 100);
+//
+// integrity::verifyFunctions(...)   - verify multiple functions at once
+//                                    usage: if(!integrity::verifyFunctions(f1, f2)) { }
 //
 // =================================================================
 
@@ -405,6 +555,128 @@ namespace cloakwork {
     #define CW_RANDOM() (rand())
     #define CW_RAND(min, max) ((min) + (rand() % ((max) - (min) + 1)))
 #endif
+
+    // =================================================================
+    // compile-time string hashing
+    // =================================================================
+
+    namespace hash {
+        // fnv-1a hash for compile-time string hashing
+        consteval uint32_t fnv1a(const char* str, size_t len) {
+            uint32_t hash = 0x811c9dc5;
+            for (size_t i = 0; i < len; ++i) {
+                hash ^= static_cast<uint8_t>(str[i]);
+                hash *= 0x01000193;
+            }
+            return hash;
+        }
+
+        // consteval version for string literals
+        template<size_t N>
+        consteval uint32_t fnv1a(const char (&str)[N]) {
+            return fnv1a(str, N - 1);
+        }
+
+        // wide string version
+        consteval uint32_t fnv1a_wide(const wchar_t* str, size_t len) {
+            uint32_t hash = 0x811c9dc5;
+            for (size_t i = 0; i < len; ++i) {
+                hash ^= static_cast<uint8_t>(str[i] & 0xFF);
+                hash *= 0x01000193;
+                hash ^= static_cast<uint8_t>((str[i] >> 8) & 0xFF);
+                hash *= 0x01000193;
+            }
+            return hash;
+        }
+
+        template<size_t N>
+        consteval uint32_t fnv1a_wide(const wchar_t (&str)[N]) {
+            return fnv1a_wide(str, N - 1);
+        }
+
+        // runtime hash for dynamic strings
+        CW_FORCEINLINE uint32_t fnv1a_runtime(const char* str) {
+            uint32_t hash = 0x811c9dc5;
+            while (*str) {
+                hash ^= static_cast<uint8_t>(*str++);
+                hash *= 0x01000193;
+            }
+            return hash;
+        }
+
+        CW_FORCEINLINE uint32_t fnv1a_runtime(const wchar_t* str) {
+            uint32_t hash = 0x811c9dc5;
+            while (*str) {
+                hash ^= static_cast<uint8_t>(*str & 0xFF);
+                hash *= 0x01000193;
+                hash ^= static_cast<uint8_t>((*str >> 8) & 0xFF);
+                hash *= 0x01000193;
+                ++str;
+            }
+            return hash;
+        }
+
+        // case-insensitive runtime hash
+        CW_FORCEINLINE uint32_t fnv1a_runtime_ci(const char* str) {
+            uint32_t hash = 0x811c9dc5;
+            while (*str) {
+                char c = *str++;
+                if (c >= 'A' && c <= 'Z') c += 32;
+                hash ^= static_cast<uint8_t>(c);
+                hash *= 0x01000193;
+            }
+            return hash;
+        }
+
+        CW_FORCEINLINE uint32_t fnv1a_runtime_ci(const wchar_t* str) {
+            uint32_t hash = 0x811c9dc5;
+            while (*str) {
+                wchar_t c = *str++;
+                if (c >= L'A' && c <= L'Z') c += 32;
+                hash ^= static_cast<uint8_t>(c & 0xFF);
+                hash *= 0x01000193;
+                hash ^= static_cast<uint8_t>((c >> 8) & 0xFF);
+                hash *= 0x01000193;
+            }
+            return hash;
+        }
+
+        // case-insensitive wide-to-ascii runtime hash
+        // (hashes wide string as if it were ascii - for comparing against CW_HASH_CI)
+        CW_FORCEINLINE uint32_t fnv1a_runtime_ci_w2a(const wchar_t* str) {
+            uint32_t hash = 0x811c9dc5;
+            while (*str) {
+                wchar_t c = *str++;
+                if (c >= L'A' && c <= L'Z') c += 32;
+                // only use low byte (ascii portion) to match CW_HASH_CI behavior
+                hash ^= static_cast<uint8_t>(c & 0xFF);
+                hash *= 0x01000193;
+            }
+            return hash;
+        }
+
+        // case-insensitive compile-time hash (for module names)
+        consteval uint32_t fnv1a_ci(const char* str, size_t len) {
+            uint32_t hash = 0x811c9dc5;
+            for (size_t i = 0; i < len; ++i) {
+                char c = str[i];
+                if (c >= 'A' && c <= 'Z') c += 32;
+                hash ^= static_cast<uint8_t>(c);
+                hash *= 0x01000193;
+            }
+            return hash;
+        }
+
+        template<size_t N>
+        consteval uint32_t fnv1a_ci(const char (&str)[N]) {
+            return fnv1a_ci(str, N - 1);
+        }
+    }
+
+    // compile-time hash macro
+    #define CW_HASH(s) ([]() consteval { return cloakwork::hash::fnv1a(s); }())
+    #define CW_HASH_WIDE(s) ([]() consteval { return cloakwork::hash::fnv1a_wide(s); }())
+    #define CW_HASH_CI(s) ([]() consteval { return cloakwork::hash::fnv1a_ci(s); }())
 
     // =================================================================
     // anti-debugging and anti-analysis
@@ -799,6 +1071,252 @@ namespace cloakwork {
             // implementation depends on context
 #endif
         }
+
+#if CW_ENABLE_ANTI_VM
+        // anti-VM and sandbox detection
+        namespace anti_vm {
+
+            // detect hypervisor via cpuid
+            CW_FORCEINLINE bool is_hypervisor_present() {
+#ifdef _WIN32
+                int cpuInfo[4];
+                __cpuid(cpuInfo, 1);
+                return (cpuInfo[2] >> 31) & 1;  // hypervisor bit
+#else
+                return false;
+#endif
+            }
+
+            // detect VM vendor string
+            CW_FORCEINLINE bool detect_vm_vendor() {
+#ifdef _WIN32
+                __try {
+                    int cpuInfo[4];
+                    __cpuid(cpuInfo, 0x40000000);
+
+                    char vendor[13];
+                    memcpy(vendor, &cpuInfo[1], 4);
+                    memcpy(vendor + 4, &cpuInfo[2], 4);
+                    memcpy(vendor + 8, &cpuInfo[3], 4);
+                    vendor[12] = 0;
+
+                    const char* vmVendors[] = {
+                        "VMwareVMware", "Microsoft Hv", "VBoxVBoxVBox",
+                        "KVMKVMKVM\0\0\0", "XenVMMXenVMM", "prl hyperv  ",
+                        "TCGTCGTCGTCG", nullptr
+                    };
+
+                    for (int i = 0; vmVendors[i]; ++i) {
+                        if (memcmp(vendor, vmVendors[i], 12) == 0) return true;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    return false;
+                }
+#endif
+                return false;
+            }
+
+            // check for low resource counts (common in sandboxes)
+            CW_FORCEINLINE bool detect_low_resources() {
+#ifdef _WIN32
+                __try {
+                    SYSTEM_INFO si;
+                    GetSystemInfo(&si);
+                    if (si.dwNumberOfProcessors < 2) return true;
+
+                    MEMORYSTATUSEX ms{sizeof(ms)};
+                    GlobalMemoryStatusEx(&ms);
+                    if (ms.ullTotalPhys < 2ULL * 1024 * 1024 * 1024) return true;
+
+                    // check disk size
+                    ULARGE_INTEGER freeBytesAvailable, totalBytes, freeBytes;
+                    if (GetDiskFreeSpaceExA("C:\\", &freeBytesAvailable, &totalBytes, &freeBytes)) {
+                        if (totalBytes.QuadPart < 60ULL * 1024 * 1024 * 1024) return true;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    return false;
+                }
+#endif
+                return false;
+            }
+
+            // detect common sandbox DLLs
+            CW_FORCEINLINE bool detect_sandbox_dlls() {
+#ifdef _WIN32
+                __try {
+                    const char* sandboxDlls[] = {
+                        "SbieDll.dll",      // sandboxie
+                        "dbghelp.dll",      // often loaded by analysis tools
+                        "api_log.dll",      // api logging
+                        "dir_watch.dll",    // directory watching
+                        "pstorec.dll",      // password store (sometimes in sandboxes)
+                        "vmcheck.dll",      // vm check library
+                        "wpespy.dll",       // wpe pro (packet editor)
+                        "cmdvrt32.dll",     // comodo sandbox
+                        "cmdvrt64.dll",     // comodo sandbox
+                        "cuckoomon.dll",    // cuckoo sandbox
+                        nullptr
+                    };
+
+                    for (int i = 0; sandboxDlls[i]; ++i) {
+                        if (GetModuleHandleA(sandboxDlls[i])) return true;
+                    }
+
+                    // check for analysis tool windows
+                    const char* analysisWindows[] = {
+                        "PROCMON_WINDOW_CLASS",
+                        "FilemonClass",
+                        "RegmonClass",
+                        "Autoruns",
+                        nullptr
+                    };
+
+                    for (int i = 0; analysisWindows[i]; ++i) {
+                        if (FindWindowA(analysisWindows[i], nullptr)) return true;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    return false;
+                }
+#endif
+                return false;
+            }
+
+            // detect suspicious usernames/computer names
+            CW_FORCEINLINE bool detect_sandbox_names() {
+#ifdef _WIN32
+                __try {
+                    char buffer[256];
+                    DWORD size = sizeof(buffer);
+
+                    // check username
+                    if (GetUserNameA(buffer, &size)) {
+                        const char* suspiciousUsers[] = {
+                            "sandbox", "virus", "malware", "sample", "test",
+                            "user", "admin", "currentuser", "vmware", "vbox",
+                            nullptr
+                        };
+
+                        for (int i = 0; suspiciousUsers[i]; ++i) {
+                            if (strstr(buffer, suspiciousUsers[i])) return true;
+                        }
+                    }
+
+                    // check computer name
+                    size = sizeof(buffer);
+                    if (GetComputerNameA(buffer, &size)) {
+                        const char* suspiciousComputers[] = {
+                            "sandbox", "test", "virus", "malware", "sample",
+                            nullptr
+                        };
+
+                        for (int i = 0; suspiciousComputers[i]; ++i) {
+                            if (strstr(buffer, suspiciousComputers[i])) return true;
+                        }
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    return false;
+                }
+#endif
+                return false;
+            }
+
+            // detect VM-specific registry keys
+            CW_FORCEINLINE bool detect_vm_registry() {
+#ifdef _WIN32
+                __try {
+                    HKEY key;
+                    const char* vmKeys[] = {
+                        "SOFTWARE\\VMware, Inc.\\VMware Tools",
+                        "SOFTWARE\\Oracle\\VirtualBox Guest Additions",
+                        "SYSTEM\\CurrentControlSet\\Services\\VBoxGuest",
+                        "SYSTEM\\CurrentControlSet\\Services\\vmci",
+                        "SYSTEM\\CurrentControlSet\\Services\\vmhgfs",
+                        nullptr
+                    };
+
+                    for (int i = 0; vmKeys[i]; ++i) {
+                        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, vmKeys[i], 0, KEY_READ, &key) == ERROR_SUCCESS) {
+                            RegCloseKey(key);
+                            return true;
+                        }
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    return false;
+                }
+#endif
+                return false;
+            }
+
+            // detect VM-specific MAC address prefixes
+            CW_FORCEINLINE bool detect_vm_mac() {
+#ifdef _WIN32
+                __try {
+                    // common VM MAC prefixes (first 3 bytes)
+                    const uint8_t vmMacPrefixes[][3] = {
+                        {0x00, 0x0C, 0x29},  // vmware
+                        {0x00, 0x50, 0x56},  // vmware
+                        {0x08, 0x00, 0x27},  // virtualbox
+                        {0x00, 0x1C, 0x42},  // parallels
+                        {0x00, 0x03, 0xFF},  // hyper-v
+                        {0x00, 0x15, 0x5D},  // hyper-v
+                    };
+
+                    // get adapter info - use raw allocation to avoid SEH/RAII conflict
+                    ULONG bufferSize = 0;
+                    GetAdaptersInfo(nullptr, &bufferSize);
+                    if (bufferSize == 0) return false;
+
+                    uint8_t* adapters = static_cast<uint8_t*>(HeapAlloc(GetProcessHeap(), 0, bufferSize));
+                    if (!adapters) return false;
+
+                    auto adapterInfo = reinterpret_cast<IP_ADAPTER_INFO*>(adapters);
+                    bool found = false;
+
+                    if (GetAdaptersInfo(adapterInfo, &bufferSize) == ERROR_SUCCESS) {
+                        for (auto adapter = adapterInfo; adapter && !found; adapter = adapter->Next) {
+                            if (adapter->AddressLength >= 3) {
+                                for (int i = 0; i < 6 && !found; ++i) {
+                                    if (memcmp(adapter->Address, vmMacPrefixes[i], 3) == 0) {
+                                        found = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HeapFree(GetProcessHeap(), 0, adapters);
+                    return found;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    return false;
+                }
+#endif
+                return false;
+            }
+
+            // comprehensive VM/sandbox check
+            CW_FORCEINLINE bool comprehensive_check() {
+                __try {
+                    if (is_hypervisor_present()) return true;
+                    if (detect_vm_vendor()) return true;
+                    if (detect_low_resources()) return true;
+                    if (detect_sandbox_dlls()) return true;
+                    if (detect_sandbox_names()) return true;
+                    if (detect_vm_registry()) return true;
+                    if (detect_vm_mac()) return true;
+                    return false;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    return false;
+                }
+            }
+        } // namespace anti_vm
+#endif // CW_ENABLE_ANTI_VM
     }
 
     // macro to crash if debugger detected
@@ -812,6 +1330,22 @@ namespace cloakwork {
 
     #define CW_INLINE_CHECK() cloakwork::anti_debug::inline_check()
 
+    // anti-VM macro
+    #if CW_ENABLE_ANTI_VM
+        #define CW_ANTI_VM() \
+            do { \
+                if(cloakwork::anti_debug::anti_vm::comprehensive_check()) { \
+                    __debugbreak(); \
+                    *(volatile int*)0 = 0; \
+                } \
+            } while(0)
+
+        #define CW_CHECK_VM() (cloakwork::anti_debug::anti_vm::comprehensive_check())
+    #else
+        #define CW_ANTI_VM() ((void)0)
+        #define CW_CHECK_VM() (false)
+    #endif
+
 #else
     // no-op when anti-debug is disabled
     namespace anti_debug {
@@ -822,9 +1356,22 @@ namespace cloakwork {
         inline bool comprehensive_check() { return false; }
         inline void inline_check() {}
         template<typename Func> inline bool verify_code_integrity(Func, size_t, uint32_t) { return true; }
+
+        namespace anti_vm {
+            inline bool is_hypervisor_present() { return false; }
+            inline bool detect_vm_vendor() { return false; }
+            inline bool detect_low_resources() { return false; }
+            inline bool detect_sandbox_dlls() { return false; }
+            inline bool detect_sandbox_names() { return false; }
+            inline bool detect_vm_registry() { return false; }
+            inline bool detect_vm_mac() { return false; }
+            inline bool comprehensive_check() { return false; }
+        }
     }
     #define CW_ANTI_DEBUG() ((void)0)
     #define CW_INLINE_CHECK() ((void)0)
+    #define CW_ANTI_VM() ((void)0)
+    #define CW_CHECK_VM() (false)
 #endif
 
     // =================================================================
@@ -1054,6 +1601,77 @@ namespace cloakwork {
                 clear_buffer();
             }
         };
+
+        // wide string encryption
+        template<size_t N, wchar_t Key1 = static_cast<wchar_t>(CW_RAND_CT(1, 127)), wchar_t Key2 = static_cast<wchar_t>(CW_RAND_CT(1, 127))>
+        class encrypted_wstring {
+        private:
+            std::array<wchar_t, N> data;
+            mutable std::atomic<bool> decrypted{false};
+            mutable std::mutex mutex;
+
+            static constexpr uint16_t compile_key1 = static_cast<uint16_t>(Key1);
+            static constexpr uint16_t compile_key2 = static_cast<uint16_t>(Key2);
+
+            static constexpr wchar_t encrypt_char(wchar_t c, size_t i) {
+                wchar_t k1 = static_cast<wchar_t>(compile_key1 + static_cast<uint16_t>(i));
+                wchar_t k2 = static_cast<wchar_t>(compile_key2 - static_cast<uint16_t>(i * 3));
+                wchar_t k3 = static_cast<wchar_t>((i * i) ^ 0x5A5A);
+                return c ^ k1 ^ k2 ^ k3;
+            }
+
+            CW_FORCEINLINE void decrypt_impl() const {
+                if(!decrypted.load(std::memory_order_acquire)) {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    if (!decrypted.load(std::memory_order_relaxed)) {
+                        auto& mutable_data = const_cast<std::array<wchar_t, N>&>(data);
+                        for(size_t i = 0; i < N; ++i) {
+                            wchar_t k1 = static_cast<wchar_t>(compile_key1 + static_cast<uint16_t>(i));
+                            wchar_t k2 = static_cast<wchar_t>(compile_key2 - static_cast<uint16_t>(i * 3));
+                            wchar_t k3 = static_cast<wchar_t>((i * i) ^ 0x5A5A);
+                            mutable_data[i] ^= k1 ^ k2 ^ k3;
+                        }
+                        decrypted.store(true, std::memory_order_release);
+                    }
+                }
+            }
+
+            CW_FORCEINLINE void encrypt_impl() const {
+                if(decrypted.load(std::memory_order_acquire)) {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    if (decrypted.load(std::memory_order_relaxed)) {
+                        auto& mutable_data = const_cast<std::array<wchar_t, N>&>(data);
+                        for(size_t i = 0; i < N; ++i) {
+                            wchar_t k1 = static_cast<wchar_t>(compile_key1 + static_cast<uint16_t>(i));
+                            wchar_t k2 = static_cast<wchar_t>(compile_key2 - static_cast<uint16_t>(i * 3));
+                            wchar_t k3 = static_cast<wchar_t>((i * i) ^ 0x5A5A);
+                            mutable_data[i] ^= k1 ^ k2 ^ k3;
+                        }
+                        decrypted.store(false, std::memory_order_release);
+                    }
+                }
+            }
+
+        public:
+            template<size_t... I>
+            constexpr encrypted_wstring(const wchar_t (&str)[N], std::index_sequence<I...>)
+                : data{encrypt_char(str[I], I)...}, decrypted(false) {}
+
+            constexpr encrypted_wstring(const wchar_t (&str)[N])
+                : encrypted_wstring(str, std::make_index_sequence<N>{}) {}
+
+            CW_FORCEINLINE const wchar_t* get() const {
+                decrypt_impl();
+                return data.data();
+            }
+
+            CW_FORCEINLINE operator const wchar_t*() const { return get(); }
+
+            ~encrypted_wstring() { encrypt_impl(); }
+        };
+
+        template<size_t N>
+        encrypted_wstring(const wchar_t (&)[N]) -> encrypted_wstring<N>;
     }
 
     // macro for easy string encryption with immediate re-encryption
@@ -1082,11 +1700,21 @@ namespace cloakwork {
         return cloakwork::string_encrypt::stack_encrypted_string<sizeof(s)>(enc); \
     }())
 
+// wide string encryption macro
+#define CW_WSTR(s) \
+    static_cast<const wchar_t*>(([]() -> const wchar_t* { \
+        static cloakwork::string_encrypt::encrypted_wstring<sizeof(s)/sizeof(wchar_t)> enc(s); \
+        int dummy = static_cast<int>(CW_RANDOM_RT() & 1); \
+        CW_COMPILER_BARRIER(); \
+        return dummy >= 0 ? enc.get() : nullptr; \
+    }()))
+
 #else
     // no-op when string encryption is disabled
     #define CW_STR(s) (s)
     #define CW_STR_LAYERED(s) (s)
     #define CW_STR_STACK(s) (s)
+    #define CW_WSTR(s) (s)
 #endif
 
     // =================================================================
@@ -2005,6 +2633,569 @@ namespace cloakwork {
             }
         };
     }
+#endif
+
+    // =================================================================
+    // import hiding and dynamic API resolution
+    // =================================================================
+
+#if CW_ENABLE_IMPORT_HIDING
+    namespace imports {
+
+        // get module base by walking PEB
+        CW_FORCEINLINE void* getModuleBase(uint32_t moduleHash) {
+#ifdef _WIN32
+            __try {
+#ifdef _WIN64
+                auto peb = reinterpret_cast<PEB*>(__readgsqword(0x60));
+#else
+                auto peb = reinterpret_cast<PEB*>(__readfsdword(0x30));
+#endif
+                if (!peb || !peb->Ldr) return nullptr;
+
+                auto ldr = peb->Ldr;
+                auto head = &ldr->InMemoryOrderModuleList;
+
+                for (auto curr = head->Flink; curr != head; curr = curr->Flink) {
+                    // use our full structure definition
+                    auto entry = CONTAINING_RECORD(curr, cloakwork_internal::CW_LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
+                    if (!entry->BaseDllName.Buffer) continue;
+
+                    // use wide-to-ascii hash to match CW_HASH_CI (ascii) against wide string from PEB
+                    uint32_t modHash = hash::fnv1a_runtime_ci_w2a(entry->BaseDllName.Buffer);
+                    if (modHash == moduleHash) {
+                        return entry->DllBase;
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                return nullptr;
+            }
+#endif
+            return nullptr;
+        }
+
+        // get function address by walking export table
+        CW_FORCEINLINE void* getProcAddress(void* module, uint32_t funcHash) {
+#ifdef _WIN32
+            if (!module) return nullptr;
+
+            __try {
+                auto dos = static_cast<IMAGE_DOS_HEADER*>(module);
+                if (dos->e_magic != IMAGE_DOS_SIGNATURE) return nullptr;
+
+                auto nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
+                    reinterpret_cast<uint8_t*>(module) + dos->e_lfanew);
+                if (nt->Signature != IMAGE_NT_SIGNATURE) return nullptr;
+
+                auto exportDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+                if (exportDir.VirtualAddress == 0) return nullptr;
+
+                auto exports = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(
+                    reinterpret_cast<uint8_t*>(module) + exportDir.VirtualAddress);
+
+                auto names = reinterpret_cast<uint32_t*>(
+                    reinterpret_cast<uint8_t*>(module) + exports->AddressOfNames);
+                auto ordinals = reinterpret_cast<uint16_t*>(
+                    reinterpret_cast<uint8_t*>(module) + exports->AddressOfNameOrdinals);
+                auto functions = reinterpret_cast<uint32_t*>(
+                    reinterpret_cast<uint8_t*>(module) + exports->AddressOfFunctions);
+
+                for (uint32_t i = 0; i < exports->NumberOfNames; ++i) {
+                    auto name = reinterpret_cast<const char*>(
+                        reinterpret_cast<uint8_t*>(module) + names[i]);
+
+                    if (hash::fnv1a_runtime(name) == funcHash) {
+                        uint32_t funcRva = functions[ordinals[i]];
+
+                        // check for forwarded export
+                        if (funcRva >= exportDir.VirtualAddress &&
+                            funcRva < exportDir.VirtualAddress + exportDir.Size) {
+                            // forwarded export - not handling for simplicity
+                            return nullptr;
+                        }
+
+                        return reinterpret_cast<uint8_t*>(module) + funcRva;
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                return nullptr;
+            }
+#endif
+            return nullptr;
+        }
+
+        // cached import resolution
+        template<uint32_t ModuleHash, uint32_t FuncHash>
+        CW_FORCEINLINE void* getCachedImport() {
+            static void* cached = nullptr;
+            if (!cached) {
+                void* mod = getModuleBase(ModuleHash);
+                if (mod) cached = getProcAddress(mod, FuncHash);
+            }
+            return cached;
+        }
+    }
+
+    // macro for hidden imports (uses case-insensitive hash for module names)
+    #define CW_IMPORT(mod, func) \
+        reinterpret_cast<decltype(&func)>( \
+            cloakwork::imports::getCachedImport<CW_HASH_CI(mod), CW_HASH(#func)>())
+
+    #define CW_IMPORT_WIDE(mod, func) \
+        reinterpret_cast<decltype(&func)>( \
+            cloakwork::imports::getCachedImport<CW_HASH_WIDE(mod), CW_HASH(#func)>())
+#else
+    namespace imports {
+        inline void* getModuleBase(uint32_t) { return nullptr; }
+        inline void* getProcAddress(void*, uint32_t) { return nullptr; }
+    }
+    #define CW_IMPORT(mod, func) (&func)
+    #define CW_IMPORT_WIDE(mod, func) (&func)
+#endif
+
+    // =================================================================
+    // direct syscalls
+    // =================================================================
+
+#if CW_ENABLE_SYSCALLS
+    namespace syscall {
+
+        // get syscall number from ntdll function
+        CW_FORCEINLINE uint32_t getSyscallNumber(uint32_t funcHash) {
+#ifdef _WIN32
+            __try {
+                void* ntdll = imports::getModuleBase(CW_HASH_CI("ntdll.dll"));
+                if (!ntdll) return 0;
+
+                auto func = reinterpret_cast<uint8_t*>(imports::getProcAddress(ntdll, funcHash));
+                if (!func) return 0;
+
+                // pattern: mov r10, rcx; mov eax, <syscall_number>
+                // 4C 8B D1 B8 XX XX XX XX
+                if (func[0] == 0x4C && func[1] == 0x8B && func[2] == 0xD1 && func[3] == 0xB8) {
+                    return *reinterpret_cast<uint32_t*>(func + 4);
+                }
+
+                // alternative pattern for older windows
+                // B8 XX XX XX XX
+                if (func[0] == 0xB8) {
+                    return *reinterpret_cast<uint32_t*>(func + 1);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                return 0;
+            }
+#endif
+            return 0;
+        }
+
+        // cached syscall number
+        template<uint32_t FuncHash>
+        CW_FORCEINLINE uint32_t getCachedSyscallNumber() {
+            static uint32_t cached = 0;
+            if (cached == 0) {
+                cached = getSyscallNumber(FuncHash);
+            }
+            return cached;
+        }
+
+#ifdef _WIN64
+        // x64 syscall invoker - uses inline assembly via intrinsic workaround
+        // note: actual syscall invocation requires asm. this provides the infrastructure.
+        extern "C" NTSTATUS __syscall_stub(uint32_t syscallNumber, ...);
+#endif
+    }
+
+    #define CW_SYSCALL_NUMBER(func) (cloakwork::syscall::getCachedSyscallNumber<CW_HASH(#func)>())
+#else
+    namespace syscall {
+        inline uint32_t getSyscallNumber(uint32_t) { return 0; }
+    }
+    #define CW_SYSCALL_NUMBER(func) (0)
+#endif
+
+    // =================================================================
+    // obfuscated comparisons
+    // =================================================================
+
+    namespace comparison {
+
+        // obfuscated equality check
+        template<typename T>
+        CW_FORCEINLINE bool obfuscated_equals(T a, T b) {
+            if constexpr (std::is_integral_v<T>) {
+                // (a == b) <=> ((a ^ b) == 0)
+                T diff = a ^ b;
+                // use MBA to check if zero
+                T zero_check = mba::sub_mba(diff, diff);
+                CW_COMPILER_BARRIER();
+                return zero_check == static_cast<T>(0) && diff == static_cast<T>(0);
+            } else {
+                return a == b;
+            }
+        }
+
+        // obfuscated not-equals check
+        template<typename T>
+        CW_FORCEINLINE bool obfuscated_not_equals(T a, T b) {
+            if constexpr (std::is_integral_v<T>) {
+                T diff = a ^ b;
+                CW_COMPILER_BARRIER();
+                return diff != static_cast<T>(0);
+            } else {
+                return a != b;
+            }
+        }
+
+        // obfuscated less-than check
+        template<typename T>
+        CW_FORCEINLINE bool obfuscated_less(T a, T b) {
+            if constexpr (std::is_integral_v<T> && std::is_signed_v<T>) {
+                // use subtraction and check sign bit
+                T diff = mba::sub_mba(a, b);
+                CW_COMPILER_BARRIER();
+                return diff < 0;
+            } else if constexpr (std::is_integral_v<T>) {
+                // unsigned comparison via subtraction with overflow check
+                CW_COMPILER_BARRIER();
+                return a < b;  // fall back for unsigned
+            } else {
+                return a < b;
+            }
+        }
+
+        // obfuscated greater-than check
+        template<typename T>
+        CW_FORCEINLINE bool obfuscated_greater(T a, T b) {
+            return obfuscated_less(b, a);
+        }
+
+        // obfuscated less-or-equal check
+        template<typename T>
+        CW_FORCEINLINE bool obfuscated_less_equal(T a, T b) {
+            return !obfuscated_greater(a, b);
+        }
+
+        // obfuscated greater-or-equal check
+        template<typename T>
+        CW_FORCEINLINE bool obfuscated_greater_equal(T a, T b) {
+            return !obfuscated_less(a, b);
+        }
+    }
+
+    #define CW_EQ(a, b) (cloakwork::comparison::obfuscated_equals((a), (b)))
+    #define CW_NE(a, b) (cloakwork::comparison::obfuscated_not_equals((a), (b)))
+    #define CW_LT(a, b) (cloakwork::comparison::obfuscated_less((a), (b)))
+    #define CW_GT(a, b) (cloakwork::comparison::obfuscated_greater((a), (b)))
+    #define CW_LE(a, b) (cloakwork::comparison::obfuscated_less_equal((a), (b)))
+    #define CW_GE(a, b) (cloakwork::comparison::obfuscated_greater_equal((a), (b)))
+
+    // =================================================================
+    // encrypted compile-time constants
+    // =================================================================
+
+    namespace constants {
+
+        template<typename T, T Value, uint8_t Key = static_cast<uint8_t>(CW_RAND_CT(1, 255))>
+        struct encrypted_constant {
+            static CW_FORCEINLINE T get() {
+                if constexpr (std::is_integral_v<T>) {
+                    constexpr T encrypted = Value ^ static_cast<T>(Key);
+                    volatile T result = encrypted;
+                    CW_COMPILER_BARRIER();
+                    return result ^ static_cast<T>(Key);
+                } else {
+                    return Value;
+                }
+            }
+        };
+
+        // runtime-keyed constant (different each execution)
+        template<typename T>
+        class runtime_constant {
+        private:
+            T encrypted;
+            T key;
+
+        public:
+            runtime_constant(T value) {
+                key = static_cast<T>(CW_RANDOM_RT());
+                if constexpr (std::is_integral_v<T>) {
+                    encrypted = value ^ key;
+                } else {
+                    encrypted = value;
+                }
+            }
+
+            CW_FORCEINLINE T get() const {
+                if constexpr (std::is_integral_v<T>) {
+                    volatile T temp = encrypted;
+                    CW_COMPILER_BARRIER();
+                    return temp ^ key;
+                } else {
+                    return encrypted;
+                }
+            }
+
+            CW_FORCEINLINE operator T() const { return get(); }
+        };
+    }
+
+    #define CW_CONST(val) \
+        (cloakwork::constants::encrypted_constant<decltype(val), val>::get())
+
+    // =================================================================
+    // junk code insertion
+    // =================================================================
+
+#if CW_ENABLE_CONTROL_FLOW
+    namespace junk {
+
+        // generate junk computation that looks real but does nothing useful
+        template<int N = CW_RAND_CT(1, 1000)>
+        CW_NOINLINE void junk_computation() {
+            volatile int x = N;
+            volatile int y = N * 2;
+            CW_COMPILER_BARRIER();
+
+            // meaningless operations
+            x = x ^ y;
+            y = y + x;
+            x = x - y;
+            y = ~y;
+            x = x & y;
+
+            CW_COMPILER_BARRIER();
+
+            // dead branch that will never execute
+            if (control_flow::opaque_false<N>()) {
+                volatile int z = x * y;
+                z = z >> 3;
+                x = z ^ y;
+            }
+        }
+
+        // more complex junk with fake control flow
+        template<int N = CW_RAND_CT(1, 1000)>
+        CW_NOINLINE void junk_control_flow() {
+            volatile int state = N % 5;
+            CW_COMPILER_BARRIER();
+
+            for (int i = 0; i < 3; ++i) {
+                switch (state) {
+                    case 0:
+                        state = (state + 1) % 5;
+                        break;
+                    case 1:
+                        state = (state * 2) % 5;
+                        break;
+                    case 2:
+                        state = (state - 1 + 5) % 5;
+                        break;
+                    default:
+                        state = 0;
+                        break;
+                }
+                CW_COMPILER_BARRIER();
+            }
+        }
+    }
+
+    // junk code insertion macro
+    #define CW_JUNK() \
+        do { \
+            cloakwork::junk::junk_computation<CW_RAND_CT(1, 1000)>(); \
+        } while(0)
+
+    #define CW_JUNK_FLOW() \
+        do { \
+            cloakwork::junk::junk_control_flow<CW_RAND_CT(1, 1000)>(); \
+        } while(0)
+#else
+    #define CW_JUNK() ((void)0)
+    #define CW_JUNK_FLOW() ((void)0)
+#endif
+
+    // =================================================================
+    // return address spoofing
+    // =================================================================
+
+#if CW_ENABLE_FUNCTION_OBFUSCATION
+    namespace spoof {
+
+        // find a "ret" gadget in a legitimate module
+        CW_FORCEINLINE void* findRetGadget() {
+#ifdef _WIN32
+            __try {
+                void* ntdll = imports::getModuleBase(CW_HASH_CI("ntdll.dll"));
+                if (!ntdll) return nullptr;
+
+                auto dos = static_cast<IMAGE_DOS_HEADER*>(ntdll);
+                auto nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
+                    reinterpret_cast<uint8_t*>(ntdll) + dos->e_lfanew);
+
+                auto base = reinterpret_cast<uint8_t*>(ntdll);
+                size_t size = nt->OptionalHeader.SizeOfImage;
+
+                // search for ret (0xC3) gadget
+                for (size_t i = 0; i < size - 1; ++i) {
+                    if (base[i] == 0xC3) {
+                        return base + i;
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                return nullptr;
+            }
+#endif
+            return nullptr;
+        }
+
+        // cached ret gadget
+        CW_FORCEINLINE void* getRetGadget() {
+            static void* gadget = nullptr;
+            if (!gadget) {
+                gadget = findRetGadget();
+            }
+            return gadget;
+        }
+
+        // spoofed call wrapper - stores real return address and uses gadget
+        // note: full implementation requires asm for stack manipulation
+        template<typename Ret, typename... Args>
+        class spoofed_call {
+        private:
+            using FuncPtr = Ret(*)(Args...);
+            FuncPtr func;
+            void* gadget;
+
+        public:
+            spoofed_call(FuncPtr f) : func(f), gadget(getRetGadget()) {}
+
+            CW_FORCEINLINE Ret operator()(Args... args) {
+                // simplified version - full spoof requires asm
+                CW_COMPILER_BARRIER();
+                return func(args...);
+            }
+        };
+    }
+
+    #define CW_SPOOF_CALL(func) (cloakwork::spoof::spoofed_call<decltype(func)>{func})
+#else
+    namespace spoof {
+        inline void* findRetGadget() { return nullptr; }
+        inline void* getRetGadget() { return nullptr; }
+    }
+    #define CW_SPOOF_CALL(func) (func)
+#endif
+
+    // =================================================================
+    // self-integrity verification
+    // =================================================================
+
+#if CW_ENABLE_INTEGRITY_CHECKS
+    namespace integrity {
+
+        // compute hash of memory region
+        CW_FORCEINLINE uint32_t computeHash(const void* data, size_t size) {
+            const uint8_t* bytes = static_cast<const uint8_t*>(data);
+            uint32_t hash = 0x811c9dc5;
+
+            for (size_t i = 0; i < size; ++i) {
+                hash ^= bytes[i];
+                hash *= 0x01000193;
+            }
+
+            return hash;
+        }
+
+        // integrity-checked function wrapper
+        template<typename Func>
+        class integrity_checked {
+        private:
+            Func* func;
+            uint32_t expectedHash;
+            size_t codeSize;
+            mutable std::atomic<uint32_t> checkCount{0};
+
+        public:
+            integrity_checked(Func* f, size_t size)
+                : func(f), codeSize(size) {
+                expectedHash = computeHash(reinterpret_cast<const void*>(f), size);
+            }
+
+            template<typename... Args>
+            CW_FORCEINLINE auto operator()(Args&&... args) {
+                // periodic integrity check
+                if ((++checkCount % 100) == 0) {
+                    uint32_t currentHash = computeHash(
+                        reinterpret_cast<const void*>(func), codeSize);
+
+                    if (currentHash != expectedHash) {
+                        // tampered - crash
+#if CW_ANTI_DEBUG_RESPONSE == 1
+                        __debugbreak();
+                        *(volatile int*)0 = 0;
+#endif
+                    }
+                }
+
+                return func(std::forward<Args>(args)...);
+            }
+
+            bool verify() const {
+                uint32_t currentHash = computeHash(
+                    reinterpret_cast<const void*>(func), codeSize);
+                return currentHash == expectedHash;
+            }
+        };
+
+        // check for common hook patterns at function start
+        CW_FORCEINLINE bool detectHook(const void* func) {
+#ifdef _WIN32
+            const uint8_t* bytes = static_cast<const uint8_t*>(func);
+
+            // check for jmp rel32 (E9 XX XX XX XX)
+            if (bytes[0] == 0xE9) return true;
+
+            // check for jmp [rip+disp32] (FF 25 XX XX XX XX)
+            if (bytes[0] == 0xFF && bytes[1] == 0x25) return true;
+
+            // check for mov rax, addr; jmp rax (48 B8 XX XX XX XX XX XX XX XX FF E0)
+            if (bytes[0] == 0x48 && bytes[1] == 0xB8) return true;
+
+            // check for push addr; ret (68 XX XX XX XX C3)
+            if (bytes[0] == 0x68 && bytes[5] == 0xC3) return true;
+
+            // check for int3 breakpoint
+            if (bytes[0] == 0xCC) return true;
+#endif
+            return false;
+        }
+
+        // verify multiple functions at once
+        template<typename... Funcs>
+        CW_FORCEINLINE bool verifyFunctions(Funcs*... funcs) {
+            return ((!detectHook(reinterpret_cast<const void*>(funcs))) && ...);
+        }
+    }
+
+    #define CW_INTEGRITY_CHECK(func, size) \
+        (cloakwork::integrity::integrity_checked<decltype(func)>{&func, size})
+
+    #define CW_DETECT_HOOK(func) \
+        (cloakwork::integrity::detectHook(reinterpret_cast<const void*>(&func)))
+#else
+    namespace integrity {
+        inline uint32_t computeHash(const void*, size_t) { return 0; }
+        inline bool detectHook(const void*) { return false; }
+        template<typename... Funcs>
+        inline bool verifyFunctions(Funcs*...) { return true; }
+    }
+    #define CW_INTEGRITY_CHECK(func, size) (&func)
+    #define CW_DETECT_HOOK(func) (false)
 #endif
 
     // =================================================================
